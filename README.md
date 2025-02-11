@@ -10,7 +10,6 @@ Welcome to **AmpyFin**, an advanced AI-powered trading system designed for the N
 ### 🔍 Data Sources
 
 - **Financial Modeling Prep API**: Retrieves NASDAQ-100 tickers to gain crucial market insights.
-- **Polygon API**: Monitors real-time market conditions, ensuring that the system acts based on the most current data.
 
 ### 💾 Data Storage
 
@@ -135,10 +134,7 @@ pip install -r requirements.txt
 1. **Create `config.py`**:
    - Copy `config_template.py` to `config.py` and enter your API keys and MongoDB credentials.
     ```python
-    POLYGON_API_KEY = "your_polygon_api_key"
     FINANCIAL_PREP_API_KEY = "your_fmp_api_key"
-    MONGO_DB_USER = "your_mongo_user"
-    MONGO_DB_PASS = "your_mongo_password"
     API_KEY = "your_alpaca_api_key"
     API_SECRET = "your_alpaca_secret_key"
     BASE_URL = "https://paper-api.alpaca.markets"
@@ -146,10 +142,6 @@ pip install -r requirements.txt
     ```
 
 ### 4️⃣ API Setup
-
-- Polygon API
-1. Sign up at [Polygon.io](https://polygon.io/) and get an API key.
-2. Add it to `config.py` as `POLYGON_API_KEY`.
 
 - Financial Modeling Prep API
 1. Sign up at [Financial Modeling Prep](https://financialmodelingprep.com/) and get an API key.
