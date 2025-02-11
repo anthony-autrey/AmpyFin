@@ -1,4 +1,6 @@
-from config import FINANCIAL_PREP_API_KEY, API_KEY, API_SECRET, BASE_URL, mongo_url
+from polygon import RESTClient
+from config_variables import POLYGON_API_KEY, FINANCIAL_PREP_API_KEY, API_KEY, API_SECRET, BASE_URL, MONGO_URL
+import json
 import certifi
 from urllib.request import urlopen
 from zoneinfo import ZoneInfo
@@ -179,7 +181,7 @@ def main():
         post_hour_first_iteration = True
         trading_client = TradingClient(API_KEY, API_SECRET)
         data_client = StockHistoricalDataClient(API_KEY, API_SECRET)
-        mongo_client = MongoClient(mongo_url, tlsCAFile=ca)
+        mongo_client = MongoClient(MONGO_URL, tlsCAFile=ca)
         db = mongo_client.trades
         asset_collection = db.assets_quantities
         limits_collection = db.assets_limit

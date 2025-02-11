@@ -1,4 +1,5 @@
-from config import API_KEY, API_SECRET, mongo_url
+from config_variables import API_KEY, API_SECRET, POLYGON_API_KEY, MONGO_URL
+
 from helper_files.client_helper import strategies
 from pymongo import MongoClient
 from datetime import datetime
@@ -143,7 +144,7 @@ indicator_periods = {
    }
 def insert_rank_to_coefficient(i):
    try:
-      client = MongoClient(mongo_url)  
+      client = MongoClient(MONGO_URL)  
       db = client.trading_simulator 
       collections  = db.rank_to_coefficient
       """
@@ -168,7 +169,7 @@ def insert_rank_to_coefficient(i):
   
 def initialize_rank():  
    try:
-      client = MongoClient(mongo_url)  
+      client = MongoClient(MONGO_URL)  
       db = client.trading_simulator  
       collections = db.algorithm_holdings  
          
@@ -212,7 +213,7 @@ def initialize_rank():
 
 def initialize_time_delta():
    try:
-      client = MongoClient(mongo_url)
+      client = MongoClient(MONGO_URL)
       db = client.trading_simulator
       collection = db.time_delta
       collection.insert_one({"time_delta": 0.01})
@@ -223,7 +224,7 @@ def initialize_time_delta():
 
 def initialize_market_setup():
    try:
-      client = MongoClient(mongo_url)
+      client = MongoClient(MONGO_URL)
       db = client.market_data
       collection = db.market_status
       collection.insert_one({"market_status": "closed"})
@@ -234,7 +235,7 @@ def initialize_market_setup():
 
 def initialize_portfolio_percentages():
    try:
-      client = MongoClient(mongo_url)
+      client = MongoClient(MONGO_URL)
       trading_client = TradingClient(API_KEY, API_SECRET)
       account = trading_client.get_account()
       db = client.trades
@@ -260,7 +261,7 @@ def initialize_portfolio_percentages():
 def initialize_indicator_setup():
    
    try:
-      client = MongoClient(mongo_url)
+      client = MongoClient(MONGO_URL)
       db = client["IndicatorsDatabase"]
       collection = db["Indicators"]
 
@@ -275,7 +276,7 @@ def initialize_indicator_setup():
 
 def initialize_historical_database_cache():
    try:
-      client = MongoClient(mongo_url)
+      client = MongoClient(MONGO_URL)
       db = client["HistoricalDatabase"]
       collection = db["HistoricalDatabase"]
    except:

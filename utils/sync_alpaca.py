@@ -1,7 +1,7 @@
 from alpaca.trading.client import TradingClient
 from pymongo import MongoClient
 import certifi
-from config import API_KEY, API_SECRET, mongo_url
+from config_variables import API_KEY, API_SECRET, MONGO_URL
 import logging
 
 logging.basicConfig(
@@ -16,7 +16,7 @@ def sync_positions():
     """
     try:
         trading_client = TradingClient(API_KEY, API_SECRET, paper=True)
-        mongo_client = MongoClient(mongo_url, tlsCAFile=certifi.where())
+        mongo_client = MongoClient(MONGO_URL, tlsCAFile=certifi.where())
         db = mongo_client.trades
         print("\nCurrent MongoDB positions:")
         mongo_positions = {}
