@@ -1,5 +1,5 @@
 from polygon import RESTClient
-from config import POLYGON_API_KEY, FINANCIAL_PREP_API_KEY, MONGO_DB_USER, MONGO_DB_PASS, API_KEY, API_SECRET, BASE_URL, mongo_url
+from config_variables import POLYGON_API_KEY, FINANCIAL_PREP_API_KEY, API_KEY, API_SECRET, BASE_URL, MONGO_URL
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from urllib.request import urlopen
@@ -353,7 +353,7 @@ def main():
    
    
       while True: 
-         mongo_client = MongoClient(mongo_url, tlsCAFile=ca)
+         mongo_client = MongoClient(MONGO_URL, tlsCAFile=ca)
       
          status = mongo_client.market_data.market_status.find_one({})["market_status"]
       
@@ -451,7 +451,7 @@ def main():
          }
       ideal_period = {}
       time_delta = 0.01
-      mongo_client = MongoClient(mongo_url, tlsCAFile=ca)
+      mongo_client = MongoClient(MONGO_URL, tlsCAFile=ca)
       db = mongo_client.IndicatorsDatabase
       indicator_collection = db.Indicators
       for strategy in strategies:

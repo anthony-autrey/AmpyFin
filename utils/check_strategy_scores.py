@@ -1,6 +1,6 @@
 import logging
 from pymongo import MongoClient
-from config import mongo_url
+from config_variables import MONGO_URL
 from datetime import datetime
 
 logging.basicConfig(
@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 try:
     logger.info("Connecting to MongoDB...")
-    client = MongoClient(mongo_url)
+    client = MongoClient(MONGO_URL)
     db = client.trading_simulator
 
     logger.info("Fetching points tally...")

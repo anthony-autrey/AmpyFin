@@ -1,5 +1,5 @@
 from polygon import RESTClient
-from config import POLYGON_API_KEY, FINANCIAL_PREP_API_KEY, MONGO_DB_USER, MONGO_DB_PASS, API_KEY, API_SECRET, BASE_URL, mongo_url
+from config_variables import POLYGON_API_KEY, FINANCIAL_PREP_API_KEY, API_KEY, API_SECRET, BASE_URL, MONGO_URL
 import json
 import certifi
 from urllib.request import urlopen
@@ -182,7 +182,7 @@ def main():
         client = RESTClient(api_key=POLYGON_API_KEY)
         trading_client = TradingClient(API_KEY, API_SECRET)
         data_client = StockHistoricalDataClient(API_KEY, API_SECRET)
-        mongo_client = MongoClient(mongo_url, tlsCAFile=ca)
+        mongo_client = MongoClient(MONGO_URL, tlsCAFile=ca)
         db = mongo_client.trades
         asset_collection = db.assets_quantities
         limits_collection = db.assets_limit

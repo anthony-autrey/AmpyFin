@@ -1,5 +1,5 @@
 from alpaca.trading.client import TradingClient
-from config import API_KEY, API_SECRET
+from config_variables import API_KEY, API_SECRET
 import logging
 
 logging.basicConfig(

@@ -1,0 +1,17 @@
+services:
+
+  ranking:
+    image: ampyfin
+    container_name: ampyfin-rank
+    command: ["ranking_client.py"]
+    restart: unless-stopped
+    env_file:
+      - .env
+
+  trading:
+    image: ampyfin
+    container_name: ampyfin-trade
+    command: ["trading_client.py"]
+    restart: unless-stopped
+    env_file:
+      - .env
