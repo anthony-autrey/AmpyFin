@@ -1,5 +1,4 @@
-from polygon import RESTClient
-from config import POLYGON_API_KEY, FINANCIAL_PREP_API_KEY, MONGO_DB_USER, MONGO_DB_PASS, API_KEY, API_SECRET, BASE_URL, mongo_url
+from config import FINANCIAL_PREP_API_KEY, API_KEY, API_SECRET, BASE_URL, mongo_url
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from urllib.request import urlopen
@@ -45,7 +44,6 @@ import math
 import yfinance as yf
 import logging
 from collections import Counter
-from trading_client import market_status
 from helper_files.client_helper import strategies, get_latest_price, get_ndaq_tickers, dynamic_period_selector
 import time
 from datetime import datetime 
@@ -267,11 +265,11 @@ def update_portfolio_values(client):
       
       for ticker, holding in strategy_doc["holdings"].items():
           # The current price can be gotten through a cache system maybe
-          # if polygon api is getting clogged - but that hasn't happened yet
+          # if yahoo finance is getting clogged - but that hasn't happened yet
           # Also implement in C++ or C instead of python
-          # Get the current price of the ticker from the Polygon API
+          # Get the current price of the ticker from the Yahoo Finance
           # Use a cache system to store the latest prices
-          # If the cache is empty, fetch the latest price from the Polygon API
+          # If the cache is empty, fetch the latest price from the Yahoo Finance
           # Cache should be updated every 60 seconds 
 
           current_price = None
@@ -482,7 +480,7 @@ def main():
          
          return ticker_price_history[ticker].loc[start_date.strftime('%Y-%m-%d'):current_date.strftime('%Y-%m-%d')]
       
-      def update_portfolio_values(current_date):
+      def update_local_portfolio_values(current_date):
          active_count = 0
          for strategy in strategies:
                trading_simulator[strategy.__name__]["portfolio_value"] = trading_simulator[strategy.__name__]["amount_cash"]
@@ -559,7 +557,7 @@ def main():
                         elif trading_simulator[strategy.__name__]["holdings"][ticker]["quantity"] < 0:
                            Exception("Quantity cannot be negative")
                         trading_simulator[strategy.__name__]["total_trades"] += 1
-         active_count = update_portfolio_values(current_date) 
+         active_count = update_local_portfolio_values(current_date) 
          """
          log history of trading_simulator and points
          """
