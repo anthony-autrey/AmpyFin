@@ -5,6 +5,8 @@ services:
     container_name: ampyfin-rank
     command: ["ranking_client.py"]
     restart: unless-stopped
+    profiles:
+      - rank
     env_file:
       - .env
 
@@ -13,5 +15,29 @@ services:
     container_name: ampyfin-trade
     command: ["trading_client.py"]
     restart: unless-stopped
+    profiles:
+      - trade
     env_file:
       - .env
+
+  setup:
+    image: ampyfin
+    container_name: ampyfin-setup
+    command: ["setup.py"]
+    profiles:
+      - setup
+    env_file:
+      - .env
+
+  mongo:
+    image: mongo:latest
+    container_name: ampyfin-mongo
+    restart: unless-stopped
+    volumes:
+      - mongo_data:/data/db
+    profiles:
+      - mongo
+    attach: false
+  
+volumes:
+  mongo_data:

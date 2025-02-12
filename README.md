@@ -187,7 +187,7 @@ Before you begin, ensure that [Docker is installed](https://docs.docker.com/get-
     API_KEY=your_alpaca_api_key
     API_SECRET=your_alpaca_secret_key
     BASE_URL=https://paper-api.alpaca.markets
-    MONGO_URL=your mongo connection string
+    MONGO_URL=mongodb://mongo:27017/db  # Leave this value if running MongoDB in the local Docker service (see below).
     ```
 
 2. (Optional) Customize Ranking and Trading Controls:
@@ -208,7 +208,7 @@ Before you begin, ensure that [Docker is installed](https://docs.docker.com/get-
 Build the Docker image using the provided Dockerfile. Run this command in the root directory of your project:
 ```bash
 docker build -t ampyfin .
-docker run --env-file .env ampyfin setup.py
+COMPOSE_PROFILES=setup,mongo docker compose up # exclude ",mongo" if not running the local MongoDB service
 ```
 The first command tells Docker to build an image named ampyfin based on the instructions in your Dockerfile. The second command runs the image and tells it to run the setup.py script, which initializes the MongoDB database.
 

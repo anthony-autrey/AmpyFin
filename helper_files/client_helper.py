@@ -1,3 +1,4 @@
+import os
 from pymongo import MongoClient
 from alpaca.trading.requests import MarketOrderRequest
 from alpaca.trading.enums import OrderSide, TimeInForce
@@ -19,6 +20,8 @@ import certifi
 from zoneinfo import ZoneInfo
 import time
 
+ca = certifi.where()
+
 overlap_studies = [BBANDS_indicator, DEMA_indicator, EMA_indicator, HT_TRENDLINE_indicator, KAMA_indicator, MA_indicator, MAMA_indicator, MAVP_indicator, MIDPOINT_indicator, MIDPRICE_indicator, SAR_indicator, SAREXT_indicator, SMA_indicator, T3_indicator, TEMA_indicator, TRIMA_indicator, WMA_indicator]
 momentum_indicators = [ADX_indicator, ADXR_indicator, APO_indicator, AROON_indicator, AROONOSC_indicator, BOP_indicator, CCI_indicator, CMO_indicator, DX_indicator, MACD_indicator, MACDEXT_indicator, MACDFIX_indicator, MFI_indicator, MINUS_DI_indicator, MINUS_DM_indicator, MOM_indicator, PLUS_DI_indicator, PLUS_DM_indicator, PPO_indicator, ROC_indicator, ROCP_indicator, ROCR_indicator, ROCR100_indicator, RSI_indicator, STOCH_indicator, STOCHF_indicator, STOCHRSI_indicator, TRIX_indicator, ULTOSC_indicator, WILLR_indicator]
 volume_indicators = [AD_indicator, ADOSC_indicator, OBV_indicator]
@@ -31,11 +34,15 @@ statistical_functions = [BETA_indicator, CORREL_indicator, LINEARREG_indicator, 
 strategies = overlap_studies + momentum_indicators + volume_indicators + cycle_indicators + price_transforms + volatility_indicators + pattern_recognition + statistical_functions
 
 # MongoDB connection helper
-def connect_to_mongo(mongo_url):
+def get_mongo_client(mongo_url):
     """Connect to MongoDB and return the client."""
-    return MongoClient(mongo_url)
 
-# Helper to place an order
+    running_locally = os.getenv("MONGO_URL") == "mongodb://mongo:27017/db"
+    if running_locally:
+        return MongoClient(mongo_url) # TLS not required on the Docker mongo service because it blocks all external requests
+    
+    return MongoClient(mongo_url, tlsCAFile=ca)
+
 # Helper to place an order
 def place_order(trading_client, symbol, side, quantity, mongo_client):
     """
