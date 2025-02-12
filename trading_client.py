@@ -83,13 +83,8 @@ def process_ticker(ticker, trading_client, data_client, mongo_client, strategy_t
     else:
         try:
             decisions_and_quantities = []
-            current_price = None
-            while current_price is None:
-                try:
-                    current_price = get_latest_price(ticker)
-                except Exception as fetch_error:
-                    logging.warning(f"Error fetching price for {ticker}. Retrying... {fetch_error}")
-                    time.sleep(10)
+            current_price = current_price = get_latest_price(ticker)
+
             print(f"Current price of {ticker}: {current_price}")
 
             asset_collection = mongo_client.trades.assets_quantities
@@ -214,8 +209,6 @@ def main():
                 buying_power = float(account.cash)
                 portfolio_value = float(account.portfolio_value)
                 cash_to_portfolio_ratio = buying_power / portfolio_value
-                qqq_latest = get_latest_price('QQQ')
-                spy_latest = get_latest_price('SPY')
                 buy_heap = []
                 suggestion_heap = []
 
@@ -223,8 +216,13 @@ def main():
                 portfolio_collection = trades_db.portfolio_values
 
                 portfolio_collection.update_one({"name" : "portfolio_percentage"}, {"$set": {"portfolio_value": (portfolio_value-50491.13)/50491.13}})
-                portfolio_collection.update_one({"name" : "ndaq_percentage"}, {"$set": {"portfolio_value": (qqq_latest-518.58)/518.58}})
-                portfolio_collection.update_one({"name" : "spy_percentage"}, {"$set": {"portfolio_value": (spy_latest-591.95)/591.95}})
+                try:
+                    qqq_latest = get_latest_price('QQQ')
+                    spy_latest = get_latest_price('SPY')
+                    portfolio_collection.update_one({"name" : "ndaq_percentage"}, {"$set": {"portfolio_value": (qqq_latest-518.58)/518.58}})
+                    portfolio_collection.update_one({"name" : "spy_percentage"}, {"$set": {"portfolio_value": (spy_latest-591.95)/591.95}})
+                except Exception as e:
+                    logging.error(f"Error updating benchkmarks: {e}")
 
                 threads = []
 

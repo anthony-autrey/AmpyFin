@@ -62,16 +62,7 @@ import json
 
 def process_ticker(ticker, mongo_client):
    try:
-      
-      current_price = None
-      
-      while current_price is None:
-         try:
-            current_price = get_latest_price(ticker)
-         except Exception as fetch_error:
-            logging.warning(f"Error fetching price for {ticker}. Retrying... {fetch_error}")
-            time.sleep(10)
-      
+      current_price = get_latest_price(ticker)      
       indicator_tb = mongo_client.IndicatorsDatabase
       indicator_collection = indicator_tb.Indicators
       for strategy in strategies:
@@ -269,15 +260,8 @@ def update_portfolio_values(client):
           # If the cache is empty, fetch the latest price from the Yahoo Finance
           # Cache should be updated every 60 seconds 
 
-          current_price = None
-          while current_price is None:
-            try:
-               # get latest price shouldn't cache - we should also do a delay
-               current_price = get_latest_price(ticker)
-            except:
-               print(f"Error fetching price for {ticker}. Retrying...")
-               time.sleep(120)
-               # Will sleep 120 seconds before retrying to get latest price
+          current_price = get_latest_price(ticker)
+
           print(f"Current price of {ticker}: {current_price}")
           # Calculate the value of the holding
           holding_value = holding["quantity"] * current_price
