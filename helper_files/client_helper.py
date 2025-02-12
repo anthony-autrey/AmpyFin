@@ -1,8 +1,7 @@
 from pymongo import MongoClient
-from alpaca.trading.client import TradingClient
 from alpaca.trading.requests import MarketOrderRequest
 from alpaca.trading.enums import OrderSide, TimeInForce
-from datetime import datetime
+from datetime import datetime, timedelta
 import logging
 import yfinance as yf
 import sys
@@ -144,18 +143,23 @@ def get_ndaq_tickers(mongo_client, FINANCIAL_PREP_API_KEY):
     return tickers
 
 # Market status checker helper
-def market_status(polygon_client):
+def market_status(trading_client):
     """
-    Check market status using the Polygon API.
+    Check market status using the Alpaca Trading API.
 
-    :param polygon_client: An instance of the Polygon RESTClient
+    :param trading_client: The Alpaca trading client instance
     :return: Current market status ('open', 'early_hours', 'closed')
     """
     try:
-        status = polygon_client.get_market_status()
-        if status.exchanges.nasdaq == "open" and status.exchanges.nyse == "open":
+        # Determine premarket hours by substracting 5.5 hours from next open, resulting in 4am on the next open trading day
+        # See: https://docs.alpaca.markets/docs/orders-at-alpaca#extended-hours-trading
+        status = trading_client.get_clock() 
+        early_hours_start = status.next_open - timedelta(hours=5, minutes=30)
+        current_time = status.timestamp
+
+        if status.is_open:
             return "open"
-        elif status.early_hours:
+        elif current_time > early_hours_start:
             return "early_hours"
         else:
             return "closed"

@@ -1,4 +1,4 @@
-from config_variables import API_KEY, API_SECRET, POLYGON_API_KEY, MONGO_URL
+from config_variables import API_KEY, API_SECRET, MONGO_URL
 from helper_files.client_helper import strategies
 from pymongo import MongoClient
 from datetime import datetime
