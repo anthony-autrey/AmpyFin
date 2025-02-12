@@ -1,11 +1,8 @@
-
-from config_variables import POLYGON_API_KEY, FINANCIAL_PREP_API_KEY, API_KEY, API_SECRET, BASE_URL, MONGO_URL
-
+from config_variables import FINANCIAL_PREP_API_KEY, API_KEY, API_SECRET, BASE_URL, MONGO_URL
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from urllib.request import urlopen
 from zoneinfo import ZoneInfo
-from pymongo import MongoClient
 import time
 from datetime import datetime, timedelta
 import alpaca
@@ -46,12 +43,10 @@ import math
 import yfinance as yf
 import logging
 from collections import Counter
-from helper_files.client_helper import strategies, get_latest_price, get_ndaq_tickers, dynamic_period_selector
+from helper_files.client_helper import strategies, get_latest_price, get_ndaq_tickers, get_mongo_client
 import time
 from datetime import datetime 
-import heapq 
-import certifi
-ca = certifi.where()
+import heapq
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
@@ -353,8 +348,7 @@ def main():
    
    
       while True: 
-         mongo_client = MongoClient(MONGO_URL, tlsCAFile=ca)
-      
+         mongo_client = get_mongo_client(MONGO_URL)      
          status = mongo_client.market_data.market_status.find_one({})["market_status"]
       
          if status == "open":  
@@ -451,7 +445,7 @@ def main():
          }
       ideal_period = {}
       time_delta = 0.01
-      mongo_client = MongoClient(MONGO_URL, tlsCAFile=ca)
+      mongo_client = get_mongo_client(MONGO_URL)
       db = mongo_client.IndicatorsDatabase
       indicator_collection = db.Indicators
       for strategy in strategies:

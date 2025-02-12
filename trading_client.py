@@ -1,13 +1,10 @@
-from polygon import RESTClient
-from config_variables import POLYGON_API_KEY, FINANCIAL_PREP_API_KEY, API_KEY, API_SECRET, BASE_URL, MONGO_URL
+from config_variables import FINANCIAL_PREP_API_KEY, API_KEY, API_SECRET, BASE_URL, MONGO_URL
 import json
-import certifi
 from urllib.request import urlopen
 from zoneinfo import ZoneInfo
-from pymongo import MongoClient
 import time
 from datetime import datetime, timedelta
-from helper_files.client_helper import place_order, get_ndaq_tickers, market_status, strategies, get_latest_price, dynamic_period_selector
+from helper_files.client_helper import place_order, get_ndaq_tickers, market_status, strategies, get_latest_price, get_mongo_client
 from alpaca.trading.client import TradingClient
 from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
 from alpaca.data.historical.stock import StockHistoricalDataClient
@@ -31,9 +28,6 @@ from control import trade_mode, trade_liquidity_limit, trade_asset_limit, sugges
 buy_heap = []
 suggestion_heap = []
 sold = False
-
-
-ca = certifi.where()
 
 # Set up logging configuration
 logging.basicConfig(
@@ -181,7 +175,7 @@ def main():
         post_hour_first_iteration = True
         trading_client = TradingClient(API_KEY, API_SECRET)
         data_client = StockHistoricalDataClient(API_KEY, API_SECRET)
-        mongo_client = MongoClient(MONGO_URL, tlsCAFile=ca)
+        mongo_client = get_mongo_client(MONGO_URL)
         db = mongo_client.trades
         asset_collection = db.assets_quantities
         limits_collection = db.assets_limit
