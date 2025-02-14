@@ -413,6 +413,11 @@ def main():
       ticker_price_history = {}
       trading_simulator = {}
       points = {}
+
+      mongo_client = get_mongo_client(MONGO_URL) 
+      db = mongo_client.trading_simulator
+      points_collection = db.points_tally
+
       """
       need it for time_delta component and we need to adapt time delta for multiple modes - multiplicative, balanced or additive
       """
@@ -430,24 +435,34 @@ def main():
       ideal_period = {}
       time_delta = 0.01
       mongo_client = get_mongo_client(MONGO_URL)
-      db = mongo_client.IndicatorsDatabase
-      indicator_collection = db.Indicators
+      indicator_collection = mongo_client.IndicatorsDatabase.Indicators
+      points_collection = mongo_client.trading_simulator.points_tally
       for strategy in strategies:
          period = indicator_collection.find_one({'indicator': strategy.__name__})
          ideal_period[strategy.__name__] = period['ideal_period']
+
+      start_date = datetime.strptime(period_start, "%Y-%m-%d")
+      data_start_date = (start_date - timedelta(days=730)).strftime("%Y-%m-%d")
+      train_tickers = get_ndaq_tickers(mongo_client, FINANCIAL_PREP_API_KEY)
       
       for ticker in train_tickers:
-         data = yf.Ticker(ticker).history(start=period_start, end=period_end, interval="1d")
-         ticker_price_history[ticker] = data
+         try:
+            data = yf.Ticker(ticker).history(start=data_start_date, end=period_end, interval="1d")
+            logging.info(f'Got data: {ticker}  \t {data.iloc[0].name.date()} to {data.iloc[-1].name.date()}')
+            ticker_price_history[ticker] = data
+         except:
+            data = yf.Ticker(ticker).history(period="max", interval="1d")
+            logging.info(f'Got data: {ticker}  \t {data.iloc[0].name.date()} to {data.iloc[-1].name.date()}')
+            ticker_price_history[ticker] = data
       
       """
       now we have the data loaded, we need to simulate strategy for each day from start day to end day. create a loop that goes from start to end date
       """
       # Now simulate strategy for each day from start date to end date
-      start_date = datetime.strptime(period_start, "%Y-%m-%d")
       end_date = datetime.strptime(period_end, "%Y-%m-%d")
       current_date = start_date
       
+      print(f"Training on tickers: {train_tickers}")
       def get_historical_data(ticker, current_date, period):
          period_start_date = {
                "1mo": current_date - timedelta(days=30),
@@ -506,7 +521,7 @@ def main():
                      decision, qty = simulate_strategy(
                            strategy, ticker, current_price, historical_data, account_cash, portfolio_qty, total_portfolio_value
                      )
-                     print(f"{strategy.__name__} - {decision} - {qty} - {ticker}")
+
                      """
                      now simulate the trade
                      """
@@ -547,15 +562,19 @@ def main():
          logging.info(f"time_delta: {time_delta}")
          logging.info(f"Active count: {active_count}")
          logging.info("-------------------------------------------------")
-         results = {
-            "trading_simulator": trading_simulator,
-            "points": points,
-            "date": current_date.strftime('%Y-%m-%d'),
-            "time_delta": time_delta
-         }
-         
-         with open('training_results.json', 'w') as json_file:
-            json.dump(results, json_file, indent=4)
+
+         for strategy in strategies:
+            points_collection.update_one(
+               {"strategy": strategy.__name__},
+               {
+                  "$set" : {
+                     "last_updated": time_delta
+                  },
+                  "$set": {"total_points": points[strategy.__name__]}
+               },
+               upsert=True
+            )
+
          """
          Update time_delta based on the mode
          """
@@ -566,9 +585,8 @@ def main():
          elif time_delta_mode == 'balanced':
                time_delta += time_delta_balanced * time_delta
 
-
+         update_ranks(mongo_client)
          current_date += timedelta(days=1)
-         time.sleep(10)
             
       """
       we can update points tally and rank at the end - since training is only for each strategy
@@ -585,6 +603,7 @@ def main():
       with open('training_results.json', 'w') as json_file:
          json.dump(results, json_file, indent=4)
       """
+      mongo_client.close()
    elif rank_mode == 'test':
       return None
    
