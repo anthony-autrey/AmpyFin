@@ -1,7 +1,13 @@
+import os
+import sys
+# Add the parent directory to sys.path
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
 import logging
-from pymongo import MongoClient
-from config import mongo_url
+from helper_files.client_helper import get_mongo_client
+from config_variables import MONGO_URL
 from datetime import datetime
+
 
 logging.basicConfig(
     level=logging.INFO,
@@ -12,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 try:
     logger.info("Connecting to MongoDB...")
-    client = MongoClient(mongo_url)
+    client = get_mongo_client(MONGO_URL)
     db = client.trading_simulator
 
     logger.info("Fetching points tally...")

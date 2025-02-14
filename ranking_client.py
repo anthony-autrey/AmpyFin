@@ -1,9 +1,8 @@
-from config import FINANCIAL_PREP_API_KEY, MONGO_DB_USER, MONGO_DB_PASS, API_KEY, API_SECRET, BASE_URL, mongo_url
+from config_variables import FINANCIAL_PREP_API_KEY, API_KEY, API_SECRET, BASE_URL, MONGO_URL
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from urllib.request import urlopen
 from zoneinfo import ZoneInfo
-from pymongo import MongoClient
 import time
 from datetime import datetime, timedelta
 import alpaca
@@ -44,13 +43,10 @@ import math
 import yfinance as yf
 import logging
 from collections import Counter
-from trading_client import market_status
-from helper_files.client_helper import strategies, get_latest_price, get_ndaq_tickers, dynamic_period_selector
+from helper_files.client_helper import strategies, get_latest_price, get_ndaq_tickers, get_mongo_client
 import time
 from datetime import datetime 
-import heapq 
-import certifi
-ca = certifi.where()
+import heapq
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
@@ -66,16 +62,7 @@ import json
 
 def process_ticker(ticker, mongo_client):
    try:
-      
-      current_price = None
-      while current_price is None:
-         try:
-            current_price = get_latest_price(ticker)
-         except Exception as fetch_error:
-            logging.warning(f"Error fetching price for {ticker}. Retrying... {fetch_error}")
-            
-            return
-      
+      current_price = get_latest_price(ticker)      
       indicator_tb = mongo_client.IndicatorsDatabase
       indicator_collection = indicator_tb.Indicators
       for strategy in strategies:
@@ -352,7 +339,6 @@ def main():
    ndaq_tickers = []  
    early_hour_first_iteration = True
    post_market_hour_first_iteration = True
-
 
    while True: 
       mongo_client = MongoClient(mongo_url, tlsCAFile=ca)

@@ -10,7 +10,6 @@ Welcome to **AmpyFin**, an advanced AI-powered trading system designed for the N
 ### 🔍 Data Sources
 
 - **Financial Modeling Prep API**: Retrieves NASDAQ-100 tickers to gain crucial market insights.
-- **Polygon API**: Monitors real-time market conditions, ensuring that the system acts based on the most current data.
 
 ### 💾 Data Storage
 
@@ -145,23 +144,16 @@ pip install -r requirements.txt
 ### 3️⃣ Configuration
 
 1. **Create `config.py`**:
-   - Copy `config_template.py` to `config.py` and enter your API keys and MongoDB credentials.
+   - Copy `templates/config_template.py` to `config.py` and enter your API keys and MongoDB connection string.
     ```python
-    POLYGON_API_KEY = "your_polygon_api_key"
     FINANCIAL_PREP_API_KEY = "your_fmp_api_key"
-    MONGO_DB_USER = "your_mongo_user"
-    MONGO_DB_PASS = "your_mongo_password"
     API_KEY = "your_alpaca_api_key"
     API_SECRET = "your_alpaca_secret_key"
     BASE_URL = "https://paper-api.alpaca.markets"
-    mongo_url = "your mongo connection string"
+    MONGO_URL = "your mongo connection string"
     ```
 
 ### 4️⃣ API Setup
-
-- Polygon API
-1. Sign up at [Polygon.io](https://polygon.io/) and get an API key.
-2. Add it to `config.py` as `POLYGON_API_KEY`.
 
 - Financial Modeling Prep API
 1. Sign up at [Financial Modeling Prep](https://financialmodelingprep.com/) and get an API key.
@@ -174,10 +166,9 @@ pip install -r requirements.txt
 ### 5️⃣ Set Up MongoDB
 
 - Sign up for a MongoDB cluster (e.g., via MongoDB Atlas).
-- Create a database for stock data storage and replace the `mongo_url` in 'config.py' with your connection string. Make sure to give yourself Network Access.
+- Create a database for stock data storage and replace the `MONGO_URL` in 'config.py' with your connection string. Make sure to give yourself Network Access.
 - Run the setup script `setup.py`:
 - After running the mongo setup script, the MongoDB setup for the rest will be completed on the first minute in trading for both ranking and trading.
-
 
 ## ⚡ Usage
 
@@ -231,6 +222,67 @@ mode = 'push'
 
 ```bash
 python training_client.py
+
+
+## 🐋 Using Docker (Optional)
+
+AmpyFin includes a Dockerfile to automate the installation process and package the application as a Docker image. Using Docker offers several benefits:
+
+- **Easy Deployment:** Deploy the same image across different environments.
+- **Automated Restarts:** Containers can be configured to restart automatically on failure.
+- **Environment Configuration:** Set up via environment variables or a dedicated `.env` file.
+
+### Prerequisites
+Before you begin, ensure that [Docker is installed](https://docs.docker.com/get-docker/) on your system.
+
+### 1️⃣ Create the `.env` File
+1. Copy `templates/.env_template.py` to `.env` and enter your API keys and MongoDB connection string.
+    ```
+    # Keys
+    POLYGON_API_KEY=your_polygon_api_key
+    FINANCIAL_PREP_API_KEY=your_fmp_api_key
+    API_KEY=your_alpaca_api_key
+    API_SECRET=your_alpaca_secret_key
+    BASE_URL=https://paper-api.alpaca.markets
+    MONGO_URL=mongodb://mongo:27017/db  # Leave this value if running MongoDB in the local Docker service (see below).
+    ```
+
+2. (Optional) Customize Ranking and Trading Controls:
+    ```
+    # Ranking Controls
+    RANK_MODE=live
+    RANK_LIQUIDITY_LIMIT=15000
+    RANK_ASSET_LIMIT=0.1
+
+    # Trading Controls
+    TRADE_MODE=live
+    TRADE_LIQUIDITY_LIMIT=15000
+    TRADE_ASSET_LIMIT=0.1
+    ```
+
+### 2️⃣ Build Ampyfin Docker Image and Initialize Database
+
+Build the Docker image using the provided Dockerfile. Run this command in the root directory of your project:
+```bash
+docker build -t ampyfin .
+COMPOSE_PROFILES=setup,mongo docker compose up # exclude ",mongo" if not running the local MongoDB service
+```
+The first command tells Docker to build an image named ampyfin based on the instructions in your Dockerfile. The second command runs the image and tells it to run the setup.py script, which initializes the MongoDB database.
+
+### 3️⃣ Run the Ranking and Trading Containers
+
+AmpyFin is designed to run its ranking and trading services in separate containers. To start the services, use Docker Compose:
+```bash
+docker compose up
+```
+What this does:
+- Starts Multiple Containers: Each service (ranking and trading) runs in its own container.
+- Automatic Restart: Containers are configured to restart automatically if they crash.
+- Unified Environment: Docker Compose sets up networking between containers for seamless communication.
+
+*Tip*: To run the containers in the background (detached mode), use:
+```bash
+docker compose up -d
 ```
 
 ## ⚠️ IMPORTANT

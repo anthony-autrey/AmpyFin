@@ -1,13 +1,10 @@
-from polygon import RESTClient
-from config import POLYGON_API_KEY, FINANCIAL_PREP_API_KEY, MONGO_DB_USER, MONGO_DB_PASS, API_KEY, API_SECRET, BASE_URL, mongo_url
+from config_variables import FINANCIAL_PREP_API_KEY, API_KEY, API_SECRET, BASE_URL, MONGO_URL
 import json
-import certifi
 from urllib.request import urlopen
 from zoneinfo import ZoneInfo
-from pymongo import MongoClient
 import time
 from datetime import datetime, timedelta
-from helper_files.client_helper import place_order, get_ndaq_tickers, market_status, strategies, get_latest_price, dynamic_period_selector
+from helper_files.client_helper import place_order, get_ndaq_tickers, market_status, strategies, get_latest_price, get_mongo_client
 from alpaca.trading.client import TradingClient
 from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
 from alpaca.data.historical.stock import StockHistoricalDataClient
@@ -31,9 +28,6 @@ from control import trade_liquidity_limit, trade_asset_limit, suggestion_heap_li
 buy_heap = []
 suggestion_heap = []
 sold = False
-
-
-ca = certifi.where()
 
 # Set up logging configuration
 logging.basicConfig(
@@ -80,7 +74,7 @@ def weighted_majority_decision_and_median_quantity(decisions_and_quantities):
     else:
         return 'hold', 0, buy_weight, sell_weight, hold_weight
 
-def process_ticker(ticker, client, trading_client, data_client, mongo_client, strategy_to_coefficient):
+def process_ticker(ticker, trading_client, data_client, mongo_client, strategy_to_coefficient):
     global buy_heap
     global suggestion_heap
     global sold

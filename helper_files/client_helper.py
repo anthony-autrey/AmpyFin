@@ -1,5 +1,5 @@
+import os
 from pymongo import MongoClient
-from alpaca.trading.client import TradingClient
 from alpaca.trading.requests import MarketOrderRequest
 from alpaca.trading.enums import OrderSide, TimeInForce
 from datetime import datetime, timedelta, timezone
@@ -20,6 +20,8 @@ import certifi
 from zoneinfo import ZoneInfo
 import time
 
+ca = certifi.where()
+
 overlap_studies = [BBANDS_indicator, DEMA_indicator, EMA_indicator, HT_TRENDLINE_indicator, KAMA_indicator, MA_indicator, MAMA_indicator, MAVP_indicator, MIDPOINT_indicator, MIDPRICE_indicator, SAR_indicator, SAREXT_indicator, SMA_indicator, T3_indicator, TEMA_indicator, TRIMA_indicator, WMA_indicator]
 momentum_indicators = [ADX_indicator, ADXR_indicator, APO_indicator, AROON_indicator, AROONOSC_indicator, BOP_indicator, CCI_indicator, CMO_indicator, DX_indicator, MACD_indicator, MACDEXT_indicator, MACDFIX_indicator, MFI_indicator, MINUS_DI_indicator, MINUS_DM_indicator, MOM_indicator, PLUS_DI_indicator, PLUS_DM_indicator, PPO_indicator, ROC_indicator, ROCP_indicator, ROCR_indicator, ROCR100_indicator, RSI_indicator, STOCH_indicator, STOCHF_indicator, STOCHRSI_indicator, TRIX_indicator, ULTOSC_indicator, WILLR_indicator]
 volume_indicators = [AD_indicator, ADOSC_indicator, OBV_indicator]
@@ -32,11 +34,15 @@ statistical_functions = [BETA_indicator, CORREL_indicator, LINEARREG_indicator, 
 strategies = overlap_studies + momentum_indicators + volume_indicators + cycle_indicators + price_transforms + volatility_indicators + pattern_recognition + statistical_functions
 
 # MongoDB connection helper
-def connect_to_mongo(mongo_url):
+def get_mongo_client(mongo_url):
     """Connect to MongoDB and return the client."""
-    return MongoClient(mongo_url)
 
-# Helper to place an order
+    running_locally = os.getenv("MONGO_URL") == "mongodb://mongo:27017/db"
+    if running_locally:
+        return MongoClient(mongo_url) # TLS not required on the Docker mongo service because it blocks all external requests
+    
+    return MongoClient(mongo_url, tlsCAFile=ca)
+
 # Helper to place an order
 def place_order(trading_client, symbol, side, quantity, mongo_client):
     """
@@ -144,18 +150,23 @@ def get_ndaq_tickers(mongo_client, FINANCIAL_PREP_API_KEY):
     return tickers
 
 # Market status checker helper
-def market_status(polygon_client):
+def market_status(trading_client):
     """
-    Check market status using the Polygon API.
+    Check market status using the Alpaca Trading API.
 
-    :param polygon_client: An instance of the Polygon RESTClient
+    :param trading_client: The Alpaca trading client instance
     :return: Current market status ('open', 'early_hours', 'closed')
     """
     try:
-        status = polygon_client.get_market_status()
-        if status.exchanges.nasdaq == "open" and status.exchanges.nyse == "open":
+        # Determine premarket hours by substracting 5.5 hours from next open, resulting in 4am on the next open trading day
+        # See: https://docs.alpaca.markets/docs/orders-at-alpaca#extended-hours-trading
+        status = trading_client.get_clock() 
+        early_hours_start = status.next_open - timedelta(hours=5, minutes=30)
+        current_time = status.timestamp
+
+        if status.is_open:
             return "open"
-        elif status.early_hours:
+        elif current_time > early_hours_start:
             return "early_hours"
         else:
             return "closed"
@@ -165,21 +176,16 @@ def market_status(polygon_client):
 
 # Helper to get latest price
 def get_latest_price(ticker):  
-   """  
-   Fetch the latest price for a given stock ticker using yfinance.  
-  
-   :param ticker: The stock ticker symbol  
-   :return: The latest price of the stock  
-   """  
-   try:  
-      ticker_yahoo = yf.Ticker(ticker)  
-      data = ticker_yahoo.history() 
+    """  
+    Fetch the latest price for a given stock ticker using yfinance.  
+    
+    :param ticker: The stock ticker symbol  
+    :return: The latest price of the stock  
+    """  
+    ticker_yahoo = yf.Ticker(ticker)  
+    data = ticker_yahoo.history()
+    return round(data['Close'].iloc[-1], 2)
 
-      return round(data['Close'].iloc[-1], 2)  
-   except Exception as e:  
-      logging.error(f"Error fetching latest price for {ticker}: {e}")  
-      return None
-   
 
 def dynamic_period_selector(ticker):
     """

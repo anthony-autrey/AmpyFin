@@ -1,3 +1,5 @@
+import os
+
 # This file is simply to fine tune parameters and switch modes
 
 # general parameters
@@ -141,20 +143,21 @@ train_take_profit = 0.05
 
 # ranking_client.py parameters
 
+rank_mode = os.getenv("RANK_MODE", "live")
 
 
 """
 rank_liquidity_limit is the amount of money you are telling the bot to reserve during ranking. 
 All bots start with a default of 50000 as liquidity with limit as specified here. This is for the ranking client. 
 """
-rank_liquidity_limit = 15000
+rank_liquidity_limit = int(os.getenv("RANK_LIQUIDITY_LIMIT", 15000))
 
 """
 rank_asset_limit to portfolio is how much asset you are allowed to hold in comparison to portfolio value for the ranking client
 The lower this number, the more diversification you will have in your portfolio. The higher the number, 
 the less diversification you will have but it will be buying more selective assets.
 """
-rank_asset_limit = 0.1
+rank_asset_limit = float(os.getenv("RANK_ASSET_LIMIT", 0.1))
 
 """
 profit_price_change_ratio_(d1 - d2) is at what price ratio you should reward each strategy
@@ -188,12 +191,14 @@ loss_profit_time_else = 2
 
 
 # trading_client.py parameters
+trade_mode = os.getenv("TRADE_MODE", "live")
+
 """
 trade_liquidity_limit is the amount of money you are telling the bot to reserve during ranking. 
 All bots start with a default of 50000. This is for the trading client. Please try not to change this.
 If you do, the suggestion for bottom limit is 20% of the portfolio value. 
 """
-trade_liquidity_limit = 15000
+trade_liquidity_limit = int(os.getenv("TRADE_LIQUIDITY_LIMIT", 15000))
 
 """
 trade_asset_limit to portfolio is how much asset you are allowed to hold in comparison to portfolio value for the trading client
@@ -201,7 +206,7 @@ The lower this number, the more diversification you will have in your portfolio.
 the less diversification you will have but it will be buying more selective assets.
 Thsi will also be reflected in Ta-Lib for suggestion and could also affect ranking as well in terms of asset_limit
 """
-trade_asset_limit = 0.1
+trade_asset_limit = float(os.getenv("TRADE_ASSET_LIMIT", 0.1))
 
 """
 suggestion heap is used in case of when the trading system becomes overpragmatic. This is at what buy_weight limit should the ticker be considered for suggestion
