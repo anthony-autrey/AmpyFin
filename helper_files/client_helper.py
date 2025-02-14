@@ -182,7 +182,6 @@ def get_latest_price(ticker):
     :param ticker: The stock ticker symbol  
     :return: The latest price of the stock  
     """  
-
     ticker_yahoo = yf.Ticker(ticker)  
     data = ticker_yahoo.history()
     return round(data['Close'].iloc[-1], 2)
