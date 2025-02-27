@@ -15,7 +15,7 @@ RUN make install
 WORKDIR /app
 
 # Install AmpyFin dependencies
-RUN pip install --break-system-packages --no-cache-dir -r requirements.txt 
+RUN pip install --upgrade --break-system-packages --no-cache-dir -r requirements.txt 
 
 # Cleanup
 RUN apk del python3-dev && apk add --no-cache python3

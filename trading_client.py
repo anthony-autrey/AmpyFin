@@ -176,20 +176,18 @@ def main():
     ndaq_tickers = []
     early_hour_first_iteration = True
     post_hour_first_iteration = True
-    client = RESTClient(api_key=POLYGON_API_KEY)
     trading_client = TradingClient(API_KEY, API_SECRET)
     data_client = StockHistoricalDataClient(API_KEY, API_SECRET)
-    mongo_client = MongoClient(mongo_url, tlsCAFile=ca)
+    mongo_client = get_mongo_client(MONGO_URL)
     db = mongo_client.trades
     asset_collection = db.assets_quantities
     limits_collection = db.assets_limit
     strategy_to_coefficient = {}
     sold = False
     while True:
-        client = RESTClient(api_key=POLYGON_API_KEY)
         trading_client = TradingClient(API_KEY, API_SECRET)
         data_client = StockHistoricalDataClient(API_KEY, API_SECRET)
-        status = market_status(client)  # Use the helper function for market status
+        status = market_status(trading_client)  # Use the helper function for market status
         db = mongo_client.trades
         asset_collection = db.assets_quantities
         limits_collection = db.assets_limit
@@ -234,7 +232,7 @@ def main():
             threads = []
 
             for ticker in ndaq_tickers:
-                thread = threading.Thread(target=process_ticker, args=(ticker, client, trading_client, data_client, mongo_client, strategy_to_coefficient))
+                thread = threading.Thread(target=process_ticker, args=(ticker, trading_client, data_client, mongo_client, strategy_to_coefficient))
                 threads.append(thread)
                 thread.start()
 

@@ -1,7 +1,7 @@
 services:
 
   ranking:
-    image: ampyfin
+    image: ampyfin:3.01
     container_name: ampyfin-rank
     command: ["ranking_client.py"]
     restart: unless-stopped
@@ -11,7 +11,7 @@ services:
       - .env
 
   trading:
-    image: ampyfin
+    image: ampyfin:3.01
     container_name: ampyfin-trade
     command: ["trading_client.py"]
     restart: unless-stopped
@@ -20,8 +20,19 @@ services:
     env_file:
       - .env
 
+  training:
+    image: ampyfin:3.01
+    container_name: ampyfin-train
+    command: ["training_client.py"]
+    volumes:
+      - training:/training-data
+    profiles:
+      - train
+    env_file:
+      - .env
+
   setup:
-    image: ampyfin
+    image: ampyfin:3.01
     container_name: ampyfin-setup
     command: ["setup.py"]
     profiles:
@@ -30,11 +41,24 @@ services:
       - .env
 
   scores:
-    image: ampyfin
+    image: ampyfin:3.01
     container_name: ampyfin-scores
     command: ["utils/check_strategy_scores.py"]
     profiles:
       - scores
+    env_file:
+      - .env
+
+  interactive:
+    image: ampyfin:3.01
+    container_name: ampyfin-int
+    entrypoint: ["/bin/sh"]
+    stdin_open: true
+    tty: true
+    volumes:
+      - training:/training-data
+    profiles:
+      - interactive
     env_file:
       - .env
 
@@ -50,3 +74,4 @@ services:
   
 volumes:
   mongo_data:
+  training:

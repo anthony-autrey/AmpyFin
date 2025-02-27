@@ -1,0 +1,7 @@
+Push to DockerHub:
+    docker build -t ampyfin:3.01 .
+    docker tag ampyfin:3.01 shepherd5pie0/repo:3.01
+    docker push shepherd5pie0/repo:3.01
+
+Run terminal in container:
+    docker exec -it ampyfin-rank /bin/sh

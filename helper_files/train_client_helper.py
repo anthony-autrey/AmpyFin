@@ -3,6 +3,8 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
+from control import train_start_cash
+
 
 def get_historical_data(ticker, current_date, period, ticker_price_history):
         period_start_date = {
@@ -25,12 +27,16 @@ def local_update_portfolio_values(current_date, strategies, trading_simulator, t
         """
         amount = 0
         for ticker in trading_simulator[strategy.__name__]["holdings"]:
+            if not current_date.strftime('%Y-%m-%d') in ticker_price_history[ticker].index:
+                continue
+            
             qty = trading_simulator[strategy.__name__]["holdings"][ticker]["quantity"]
             current_price = ticker_price_history[ticker].loc[current_date.strftime('%Y-%m-%d')]["Close"]
             amount += qty * current_price
+                
         cash = trading_simulator[strategy.__name__]["amount_cash"]
         trading_simulator[strategy.__name__]["portfolio_value"] = amount + cash
-        if trading_simulator[strategy.__name__]["portfolio_value"] != 50000:
+        if trading_simulator[strategy.__name__]["portfolio_value"] != train_start_cash:
             active_count += 1
     return active_count, trading_simulator
 

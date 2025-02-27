@@ -1,5 +1,4 @@
-from config import FINANCIAL_PREP_API_KEY, MONGO_DB_USER, MONGO_DB_PASS, API_KEY, API_SECRET, BASE_URL, mongo_url
-from pymongo import MongoClient
+from config_variables import FINANCIAL_PREP_API_KEY, API_KEY, API_SECRET, BASE_URL, MONGO_URL
 import time
 from datetime import datetime, timedelta
 from alpaca.common.exceptions import APIError
@@ -9,7 +8,7 @@ import yfinance as yf
 import logging
 from collections import Counter
 from trading_client import market_status
-from helper_files.client_helper import strategies, get_latest_price, get_ndaq_tickers, dynamic_period_selector
+from helper_files.client_helper import strategies, get_latest_price, get_ndaq_tickers, dynamic_period_selector, get_mongo_client
 import time
 from datetime import datetime 
 import heapq 
@@ -30,6 +29,7 @@ from control import mode, train_time_delta_mode, train_time_delta_increment, tra
 from control import train_profit_price_change_ratio_d1, train_profit_profit_time_d1, train_profit_price_change_ratio_d2, train_profit_profit_time_d2, train_profit_profit_time_else
 from control import train_loss_price_change_ratio_d1, train_loss_price_change_ratio_d2, train_loss_profit_time_d1, train_loss_profit_time_d2, train_loss_profit_time_else
 from control import period_start, period_end, train_tickers, train_stop_loss, train_take_profit, train_start_cash, train_trade_liquidity_limit, train_trade_asset_limit, train_suggestion_heap_limit
+from control import train_data_path
 import json
 from ranking_client import update_ranks
 from helper_files.train_client_helper import *
@@ -50,16 +50,16 @@ def train():
         points[strategy.__name__] = 0
         trading_simulator[strategy.__name__] = {
             "holdings": {},
-            "amount_cash": 50000,
+            "amount_cash": train_start_cash,
             "total_trades": 0,
             "successful_trades": 0,
             "neutral_trades": 0,
             "failed_trades": 0,
-            "portfolio_value": 50000
+            "portfolio_value": train_start_cash
         }
     ideal_period = {}
     time_delta = 0.01
-    mongo_client = MongoClient(mongo_url, tlsCAFile=ca)
+    mongo_client = get_mongo_client(MONGO_URL)
     db = mongo_client.IndicatorsDatabase
     indicator_collection = db.Indicators
     for strategy in strategies:
@@ -90,7 +90,7 @@ def train():
     start_date = datetime.strptime(period_start, "%Y-%m-%d")
     end_date = datetime.strptime(period_end, "%Y-%m-%d")
     current_date = start_date
-    mongo_client = MongoClient(mongo_url, tlsCAFile=ca)
+    mongo_client = get_mongo_client(MONGO_URL)
 
 
     print(f"Training on tickers: {train_tickers}")
@@ -124,7 +124,7 @@ def train():
                     decision, qty = simulate_strategy(
                         strategy, ticker, current_price, historical_data, account_cash, portfolio_qty, total_portfolio_value
                     )
-                    print(f"{strategy.__name__} - {decision} - {qty} - {ticker}")
+                    # print(f"{strategy.__name__} - {decision} - {qty} - {ticker}")
                     """
                     now simulate the trade
                     """
@@ -174,8 +174,10 @@ def train():
         """
         log history of trading_simulator and points
         """
-        logging.info(f"Trading simulator: {trading_simulator}")
-        logging.info(f"Points: {points}")
+
+        logging.info("-------------------------------------------------")
+        for strategy in strategies:
+            logging.info(f"\t\t{strategy.__name__}: ${trading_simulator[strategy.__name__]["portfolio_value"]}")
         logging.info(f"Date: {current_date.strftime('%Y-%m-%d')}")
         logging.info(f"time_delta: {time_delta}")
         logging.info(f"Active count: {active_count}")
@@ -193,7 +195,6 @@ def train():
 
 
         current_date += timedelta(days=1)
-        time.sleep(5)
         
     results = {
         "trading_simulator": trading_simulator,
@@ -202,7 +203,7 @@ def train():
         "time_delta": time_delta
         }
         
-    with open('training_results.json', 'w') as json_file:
+    with open(train_data_path, 'w') as json_file:
         json.dump(results, json_file, indent=4)
 
     """
@@ -219,14 +220,15 @@ def train():
     print("Training completed.")
    
 def push():
-    with open('training_results.json', 'r') as json_file:
+    with open(train_data_path, 'r') as json_file:
          results = json.load(json_file)
          trading_simulator = results['trading_simulator']
          points = results['points']
          date = results['date']
          time_delta = results['time_delta']
+
     # Push the trading simulator and points to the database
-    mongo_client = MongoClient(mongo_url, tlsCAFile=ca)
+    mongo_client = get_mongo_client(MONGO_URL)
     db = mongo_client.trading_simulator
     holdings_collection = db.algorithm_holdings
     points_collection = db.points_tally
@@ -262,8 +264,9 @@ def push():
         )
     db.time_delta.update_one({}, {"$set": {"time_delta": time_delta}}, upsert=True)
     update_ranks(mongo_client)
+
 def test():
-    with open('training_results.json', 'r') as json_file:
+    with open(train_data_path, 'r') as json_file:
          results = json.load(json_file)
          trading_simulator = results['trading_simulator']
          points = results['points']
@@ -276,7 +279,7 @@ def test():
     ticker_price_history = {}
     ideal_period = {}
     
-    mongo_client = MongoClient(mongo_url, tlsCAFile=ca)
+    mongo_client = get_mongo_client(MONGO_URL)
     db = mongo_client.trading_simulator
     r_t_c = db.rank_to_coefficient
 
@@ -353,11 +356,11 @@ def test():
         simulate early hour operations
         - retrieve rank and assign to new coefficient
         """
-        print(f"rank_to_coefficient: {rank_to_coefficient}")
+        # print(f"rank_to_coefficient: {rank_to_coefficient}")
         
         for strategy in strategies:
             strategy_to_coefficient[strategy.__name__] = rank_to_coefficient[rank[strategy.__name__]]
-        print(f"strategy_to_coefficient: {strategy_to_coefficient}")
+        # print(f"strategy_to_coefficient: {strategy_to_coefficient}")
         """
         simulate trading
         check stop loss + take profit and buy & sell in accordance to ranking
@@ -391,7 +394,7 @@ def test():
                     weight = strategy_to_coefficient[strategy.__name__]
                     decisions_and_quantities.append((decision, qty, weight))
                 decision, quantity, buy_weight, sell_weight, hold_weight = weighted_majority_decision_and_median_quantity(decisions_and_quantities)
-                print(f"Ticker: {ticker}, Decision: {decision}, Quantity: {quantity}, Buy Weight: {buy_weight}, Sell Weight: {sell_weight}, Hold Weight: {hold_weight}")
+                # print(f"Ticker: {ticker}, Decision: {decision}, Quantity: {quantity}, Buy Weight: {buy_weight}, Sell Weight: {sell_weight}, Hold Weight: {hold_weight}")
                 if decision == 'buy' and  ((portfolio_qty + quantity) * current_price) / account["total_portfolio_value"] <= train_trade_asset_limit:
                     heapq.heappush(buy_heap, (-(buy_weight-(sell_weight + (hold_weight * 0.5))), quantity, ticker))
                 elif decision == 'sell' and ticker in account["holdings"]:
@@ -415,14 +418,14 @@ def test():
         while (buy_heap or suggestion_heap) and float(account["cash"]) > train_trade_liquidity_limit:
             if buy_heap and float(account["cash"]) > train_trade_liquidity_limit:
                 _, quantity, ticker = heapq.heappop(buy_heap)
-                print(f"Executing BUY order for {ticker} of quantity {quantity}")
+                # print(f"Executing BUY order for {ticker} of quantity {quantity}")
                 current_price = ticker_price_history[ticker].loc[current_date.strftime('%Y-%m-%d')]['Close']
                 account["trades"].append({"symbol": ticker, "quantity": quantity, "price": current_price, "action": "buy", "date": current_date.strftime('%Y-%m-%d')})
                 account["cash"] -= quantity * current_price
                 account["holdings"][ticker] = {"quantity": quantity, "price": current_price, "stop_loss": current_price * (1 - train_stop_loss), "take_profit": current_price * (1 + train_take_profit)}
             elif suggestion_heap and float(account["cash"]) > train_trade_liquidity_limit:
                 _, quantity, ticker = heapq.heappop(suggestion_heap)
-                print(f"Executing BUY order for {ticker} of quantity {quantity}")
+                # print(f"Executing BUY order for {ticker} of quantity {quantity}")
                 current_price = ticker_price_history[ticker].loc[current_date.strftime('%Y-%m-%d')]['Close']
                 account["trades"].append({"symbol": ticker, "quantity": quantity, "price": current_price, "action": "buy", "date": current_date.strftime('%Y-%m-%d')})
                 account["cash"] -= quantity * current_price
@@ -430,14 +433,14 @@ def test():
                 
         buy_heap = []
         suggestion_heap = []
-        logging.info("-------------------------------------------------")
-        logging.info(f"Account Cash: ${account['cash']:,.2f}")
-        logging.info(f"Trades: {account['trades']}")
-        logging.info(f"Holdings: {account['holdings']}")
-        logging.info(f"Total Portfolio Value: ${account['total_portfolio_value']:,.2f}")
+        # logging.info("-------------------------------------------------")
+        # logging.info(f"Account Cash: ${account['cash']:,.2f}")
+        # logging.info(f"Trades: {account['trades']}")
+        # logging.info(f"Holdings: {account['holdings']}")
+        # logging.info(f"Total Portfolio Value: ${account['total_portfolio_value']:,.2f}")
         
-        logging.info("-------------------------------------------------")
-        time.sleep(5)
+        # logging.info("-------------------------------------------------")
+        # time.sleep(5)
         """
         simulate ranking
         """
@@ -462,7 +465,7 @@ def test():
                     decision, qty = simulate_strategy(
                         strategy, ticker, current_price, historical_data, account_cash, portfolio_qty, total_portfolio_value
                     )
-                    print(f"{strategy.__name__} - {decision} - {qty} - {ticker}")
+                    # print(f"{strategy.__name__} - {decision} - {qty} - {ticker}")
                     """
                     now simulate the trade
                     """
@@ -509,15 +512,15 @@ def test():
                             Exception("Quantity cannot be negative")
                         trading_simulator[strategy.__name__]["total_trades"] += 1
         active_count = local_update_portfolio_values(current_date, strategies, trading_simulator, ticker_price_history) 
-        """
-        log history of trading_simulator and points
-        """
-        logging.info(f"Trading simulator: {trading_simulator}")
-        logging.info(f"Points: {points}")
-        logging.info(f"Date: {current_date.strftime('%Y-%m-%d')}")
-        logging.info(f"time_delta: {time_delta}")
-        logging.info(f"Active count: {active_count}")
-        logging.info("-------------------------------------------------")
+        # """
+        # log history of trading_simulator and points
+        # """
+        # logging.info(f"Trading simulator: {trading_simulator}")
+        # logging.info(f"Points: {points}")
+        # logging.info(f"Date: {current_date.strftime('%Y-%m-%d')}")
+        # logging.info(f"time_delta: {time_delta}")
+        # logging.info(f"Active count: {active_count}")
+        # logging.info("-------------------------------------------------")
         
         """
         Update time_delta based on the mode
@@ -545,11 +548,25 @@ def test():
         
         rank = update_ranks()
 
-        total_value = sum([holding["quantity"] * ticker_price_history[ticker].loc[current_date.strftime('%Y-%m-%d')]['Close'] for ticker, holding in trading_simulator[strategy.__name__]["holdings"].items()]) + trading_simulator[strategy.__name__]["amount_cash"]
-        account_values[current_date] = total_value
+        try:
+            total_value = sum([holding["quantity"] * ticker_price_history[ticker].loc[current_date.strftime('%Y-%m-%d')]['Close'] for ticker, holding in trading_simulator[strategy.__name__]["holdings"].items()]) + trading_simulator[strategy.__name__]["amount_cash"]
+            account_values[current_date] = total_value 
+        except KeyError:
+            # Get the last available account value (if any exists)
+            previous_dates = [date for date in account_values.keys() if date < current_date]
+            if previous_dates:
+                last_available_date = max(previous_dates)
+                account_values[current_date] = account_values[last_available_date]  # Carry forward
+            else:
+                # Default to cash if no prior data exists (e.g., first day)
+                account_values[current_date] = trading_simulator[strategy.__name__]["amount_cash"]
+
+        logging.info(f"Date: {current_date.strftime('%Y-%m-%d')}")
+        logging.info(f"Total portfolio value: {account["total_portfolio_value"]}")
+        logging.info("-------------------------------------------------")
 
         current_date += timedelta(days=1)
-        time.sleep(5)
+        # time.sleep(5)
     
     """
     Calculate metrics and generate tear sheet

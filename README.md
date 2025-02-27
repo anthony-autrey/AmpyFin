@@ -247,15 +247,20 @@ Before you begin, ensure that [Docker is installed](https://docs.docker.com/get-
     MONGO_URL=mongodb://mongo:27017/db  # Leave this value if running MongoDB in the local Docker service (see below).
     ```
 
-2. (Optional) Customize Ranking and Trading Controls:
+2. (Optional) Customize Training, Ranking, and Trading Controls:
     ```
+    # Modes:
+    # 'train'means training on historical data
+    # 'test' means running running your training results on simulator.
+    # 'live' means running your bot in live ranking mode.
+    # 'push' means pushing your trained bot to the database. This is only available for the ranking client.
+    MODE=train
+
     # Ranking Controls
-    RANK_MODE=live
     RANK_LIQUIDITY_LIMIT=15000
     RANK_ASSET_LIMIT=0.1
 
     # Trading Controls
-    TRADE_MODE=live
     TRADE_LIQUIDITY_LIMIT=15000
     TRADE_ASSET_LIMIT=0.1
     ```

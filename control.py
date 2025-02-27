@@ -14,7 +14,7 @@ time_delta_balanced is used for balanced purpose - 0.2 means 0.8 is data influen
 time_delta_mode = 'balanced'
 time_delta_increment = 0.01
 time_delta_multiplicative = 1.01
-time_delta_balanced = 0.2
+time_delta_balanced = float(os.getenv("TIME_DELTA", 0.2))
 
 # helper_files/client_helper.py
 """
@@ -40,7 +40,9 @@ There will be an option to:
 'push' means pushing your trained bot to the database. This is only available for the ranking client.
 The default for mode is live to protect against accidental training
 """
-mode = 'live'
+
+mode = os.getenv("TRAIN_MODE", "test")
+train_data_path = os.getenv("TRAIN_DATA_PATH", "training_results.json")
 
 """
 training parameters - run purely on ranking_client.py
@@ -51,8 +53,8 @@ please keep in mind training takes quite a long time. Our team trained it on a 1
 so please understand the time it takes to train.
 
 """
-period_start = "2020-01-01"
-period_end = "2020-01-15"
+period_start = os.getenv("TRAIN_START", "2023-02-14")
+period_end = os.getenv("TRAIN_END", "2025-02-14")
 train_tickers = []
 
 """
@@ -66,7 +68,7 @@ train_time_delta_balanced is used for balanced purpose - 0.2 means 0.8 is data i
 train_time_delta_mode = 'balanced'
 train_time_delta_increment = 0.01
 train_time_delta_multiplicative = 1.01
-train_time_delta_balanced = 0.
+train_time_delta_balanced = float(os.getenv("TRAIN_TIME_DELTA_BALANCED", 0.2))
 
 """
 train suggestion_heap_limit - at what threshold of buy_weight limit should the ticker be considered for suggestion
@@ -76,13 +78,13 @@ train_suggestion_heap_limit = 600000
 """
 train_start_cash - the starting cash for the training client
 """
-train_start_cash = 50000.00
+train_start_cash = float(os.getenv("TRAIN_START_CASH", 50000.00))
 
 """
 train_trade_liquidity_limit is the amount of money you are telling the bot to reserve during trading. 
 All bots start with a default of 50000 as liquidity with limit as specified here. This is for the training client.
 """
-train_trade_liquidity_limit = 15000.00
+train_trade_liquidity_limit = float(os.getenv("TRAIN_TRADE_LIQUIDITY_LIMIT", 15000.00))
 
 """
 train_trade_asset_limit to portfolio is how much asset you are allowed to hold in comparison to portfolio value for the training client during trading
@@ -97,7 +99,7 @@ train_trade_asset_limit = 0.1
 train_rank_liquidity_limit is the amount of money you are telling the bot to reserve during ranking. 
 All bots start with a default of 50000 as liquidity with limit as specified here. This is for the training client.
 """
-train_rank_liquidity_limit = 15000
+train_rank_liquidity_limit = float(os.getenv("TRAIN_RANK_LIQUIDITY_LIMIT", 15000.00))
 
 """
 train_rank_asset_limit to portfolio is how much asset you are allowed to hold in comparison to portfolio value for the training client during ranking
@@ -139,12 +141,11 @@ train_stop_loss - the percentage of loss you are willing to take before you sell
 train_take_profit - the percentage of profit you are willing to take before you sell your asset
 """
 train_stop_loss = 0.03
-train_take_profit = 0.05
+train_take_profit = float(os.getenv("TRAIN_TAKE_PROFIT", 0.05))
+
+# train_take_profit = 0.05
 
 # ranking_client.py parameters
-
-rank_mode = os.getenv("RANK_MODE", "live")
-
 
 """
 rank_liquidity_limit is the amount of money you are telling the bot to reserve during ranking. 
@@ -191,7 +192,6 @@ loss_profit_time_else = 2
 
 
 # trading_client.py parameters
-trade_mode = os.getenv("TRADE_MODE", "live")
 
 """
 trade_liquidity_limit is the amount of money you are telling the bot to reserve during ranking. 

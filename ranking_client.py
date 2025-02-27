@@ -341,7 +341,7 @@ def main():
    post_market_hour_first_iteration = True
 
    while True: 
-      mongo_client = MongoClient(mongo_url, tlsCAFile=ca)
+      mongo_client = get_mongo_client(MONGO_URL)
    
       status = mongo_client.market_data.market_status.find_one({})["market_status"]
    
