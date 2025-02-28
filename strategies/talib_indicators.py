@@ -44,12 +44,12 @@ def get_data(ticker, mongo_client, period=None, start_date=None, end_date=None):
          print(f"Error fetching data for {ticker}: {e}")
          time.sleep(10)
   
-def simulate_strategy(strategy, ticker, current_price, historical_data, account_cash, portfolio_qty, total_portfolio_value):
+def simulate_strategy(strategy, ticker, current_price, historical_data, buying_power, portfolio_qty, total_portfolio_value):
    max_investment = total_portfolio_value * trade_asset_limit
    action = strategy(ticker, historical_data)
    
    if action == 'Buy':
-      return 'buy', min(int(max_investment // current_price), int(account_cash // current_price))
+      return 'buy', min(int(max_investment // current_price), int(buying_power // current_price))
    elif action == 'Sell' and portfolio_qty > 0:
       return 'sell', min(portfolio_qty, max(1, int(portfolio_qty * 0.5)))
    else:

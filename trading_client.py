@@ -98,7 +98,7 @@ def process_ticker(ticker, trading_client, data_client, mongo_client, strategy_t
             asset_collection = mongo_client.trades.assets_quantities
             limits_collection = mongo_client.trades.assets_limit
             account = trading_client.get_account()
-            buying_power = float(account.cash)
+            buying_power = float(account.regt_buying_power)
             portfolio_value = float(account.portfolio_value)
             cash_to_portfolio_ratio = buying_power / portfolio_value
 
@@ -115,8 +115,12 @@ def process_ticker(ticker, trading_client, data_client, mongo_client, strategy_t
                     print(f"Executing SELL order for {ticker} due to stop-loss or take-profit condition")
                     quantity = portfolio_qty
                     order = place_order(trading_client, symbol=ticker, side=OrderSide.SELL, quantity=quantity, mongo_client=mongo_client)
-                    logging.info(f"Executed SELL order for {ticker}: {order}")
-                    return
+                    if order:
+                        logging.info(f"Executed SELL order for {ticker}: {order}")
+                        return
+                    else:
+                        logging.error(f"Failed to execute SELL order for {ticker} due to stop-loss or take-profit condition")
+                        sold = False  # Reset sold flag to allow other sells
 
             indicator_tb = mongo_client.IndicatorsDatabase
             indicator_collection = indicator_tb.Indicators
@@ -139,7 +143,7 @@ def process_ticker(ticker, trading_client, data_client, mongo_client, strategy_t
             decision, quantity, buy_weight, sell_weight, hold_weight = weighted_majority_decision_and_median_quantity(decisions_and_quantities)
             print(f"Ticker: {ticker}, Decision: {decision}, Quantity: {quantity}, Weights: Buy: {buy_weight}, Sell: {sell_weight}, Hold: {hold_weight}")
 
-            if decision == "buy" and float(account.cash) > trade_liquidity_limit and (((quantity + portfolio_qty) * current_price) / portfolio_value) < trade_asset_limit:
+            if decision == "buy" and float(account.regt_buying_power) > trade_liquidity_limit and (((quantity + portfolio_qty) * current_price) / portfolio_value) < trade_asset_limit:
                 heapq.heappush(buy_heap, (-(buy_weight-(sell_weight + (hold_weight * 0.5))), quantity, ticker))
             elif decision == "sell" and portfolio_qty > 0:
                 print(f"Executing SELL order for {ticker}")
@@ -147,8 +151,12 @@ def process_ticker(ticker, trading_client, data_client, mongo_client, strategy_t
                 sold = True
                 quantity = max(quantity, 1)
                 order = place_order(trading_client, symbol=ticker, side=OrderSide.SELL, quantity=quantity, mongo_client=mongo_client)
-                logging.info(f"Executed SELL order for {ticker}: {order}")
-            elif portfolio_qty == 0.0 and buy_weight > sell_weight and (((quantity + portfolio_qty) * current_price) / portfolio_value) < trade_asset_limit and float(account.cash) > trade_liquidity_limit:
+                if order:
+                    logging.info(f"Executed SELL order for {ticker}: {order}")
+                else:
+                    logging.error(f"Failed to execute SELL order for {ticker}")
+                    sold = False  # Reset sold flag to allow other sells
+            elif portfolio_qty == 0.0 and buy_weight > sell_weight and (((quantity + portfolio_qty) * current_price) / portfolio_value) < trade_asset_limit and float(account.regt_buying_power) > trade_liquidity_limit:
                 max_investment = portfolio_value * trade_asset_limit
                 buy_quantity = min(int(max_investment // current_price), int(buying_power // current_price))
                 if buy_weight > suggestion_heap_limit:
@@ -214,7 +222,7 @@ def main():
                     post_hour_first_iteration = True
             trading_client = TradingClient(API_KEY, API_SECRET)
             account = trading_client.get_account()
-            buying_power = float(account.cash)
+            buying_power = float(account.regt_buying_power)
             portfolio_value = float(account.portfolio_value)
             cash_to_portfolio_ratio = buying_power / portfolio_value
             qqq_latest = get_latest_price('QQQ')
@@ -242,26 +250,32 @@ def main():
 
             trading_client = TradingClient(API_KEY, API_SECRET)
             account = trading_client.get_account()
-            while (buy_heap or suggestion_heap) and float(account.cash) > trade_liquidity_limit and sold is False:
+            while (buy_heap or suggestion_heap) and float(account.regt_buying_power) > trade_liquidity_limit and sold is False:
                 try:
                     trading_client = TradingClient(API_KEY, API_SECRET)
                     account = trading_client.get_account()
-                    print(f"Cash: {account.cash}")
-                    if buy_heap and float(account.cash) > trade_liquidity_limit:
+                    print(f"Buying Power: {account.regt_buying_power}")
+                    if buy_heap and float(account.regt_buying_power) > trade_liquidity_limit:
                         
                         _, quantity, ticker = heapq.heappop(buy_heap)
                         print(f"Executing BUY order for {ticker} of quantity {quantity}")
                         
                         order = place_order(trading_client, symbol=ticker, side=OrderSide.BUY, quantity=quantity, mongo_client=mongo_client)
-                        logging.info(f"Executed BUY order for {ticker}: {order}")
+                        if order:
+                            logging.info(f"Executed BUY order for {ticker}: {order}")
+                        else:
+                            logging.warning(f"Skipped BUY order for {ticker} due to margin safety checks")
                         
-                    elif suggestion_heap and float(account.cash) > trade_liquidity_limit:
+                    elif suggestion_heap and float(account.regt_buying_power) > trade_liquidity_limit:
                         
                         _, quantity, ticker = heapq.heappop(suggestion_heap)
                         print(f"Executing BUY order for {ticker} of quantity {quantity}")
                         
                         order = place_order(trading_client, symbol=ticker, side=OrderSide.BUY, quantity=quantity, mongo_client=mongo_client)
-                        logging.info(f"Executed BUY order for {ticker}: {order}")
+                        if order:
+                            logging.info(f"Executed BUY order for {ticker}: {order}")
+                        else:
+                            logging.warning(f"Skipped BUY order for {ticker} due to margin safety checks")
                         
                     time.sleep(5)
                     """

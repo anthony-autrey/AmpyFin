@@ -204,7 +204,7 @@ trade_liquidity_limit = int(os.getenv("TRADE_LIQUIDITY_LIMIT", 15000))
 trade_asset_limit to portfolio is how much asset you are allowed to hold in comparison to portfolio value for the trading client
 The lower this number, the more diversification you will have in your portfolio. The higher the number, 
 the less diversification you will have but it will be buying more selective assets.
-Thsi will also be reflected in Ta-Lib for suggestion and could also affect ranking as well in terms of asset_limit
+This will also be reflected in Ta-Lib for suggestion and could also affect ranking as well in terms of asset_limit
 """
 trade_asset_limit = float(os.getenv("TRADE_ASSET_LIMIT", 0.1))
 
@@ -213,6 +213,13 @@ suggestion heap is used in case of when the trading system becomes overpragmatic
 to buy if the system is pragmatic on all other tickers.
 """
 suggestion_heap_limit = 600000
+
+"""
+Margin safety parameters to ensure we stay within Alpaca's maintenance margin requirements.
+min_margin_ratio is the minimum maintenance margin ratio we want to maintain (higher is safer)
+Alpaca's minimum maintenance margin requirement is 25%, but we set a higher threshold as a safety buffer.
+"""
+min_margin_ratio = float(os.getenv("MIN_MARGIN_RATIO", 0.30))  # 30% minimum margin ratio for safety
 
 """
 when we train, it will be running ranking_client.py

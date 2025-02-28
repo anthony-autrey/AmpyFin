@@ -8,7 +8,7 @@ import yfinance as yf
 import sys
 from pathlib import Path
 sys.path.append("..")
-from control import stop_loss, take_profit
+from control import stop_loss, take_profit, min_margin_ratio
 
 parent_dir = Path(__file__).resolve().parent.parent
 sys.path.append(str(parent_dir))
@@ -47,55 +47,72 @@ def get_mongo_client(mongo_url):
 def place_order(trading_client, symbol, side, quantity, mongo_client):
     """
     Place a market order and log the order to MongoDB.
+    Includes margin safety checks to prevent margin calls.
 
     :param trading_client: The Alpaca trading client instance
     :param symbol: The stock symbol to trade
     :param side: Order side (OrderSide.BUY or OrderSide.SELL)
     :param qty: Quantity to trade
     :param mongo_client: MongoDB client instance
-    :return: Order result from Alpaca API
+    :return: Order result from Alpaca API or None if margin safety check fails
     """
+    current_price = get_latest_price(symbol)
     
+    # For BUY orders, check margin safety first
+    if side == OrderSide.BUY:
+        is_safe, margin_ratio = check_margin_safety(trading_client, symbol, quantity, current_price, side)
+        if not is_safe:
+            logging.warning(f"Margin safety check failed for {symbol} BUY order. "
+                           f"Margin ratio {margin_ratio:.4f} would be below minimum {min_margin_ratio:.4f}. "
+                           f"Order cancelled for safety.")
+            return None
+    
+    # If SELL order or margin check passed, proceed with order
     market_order_data = MarketOrderRequest(
         symbol=symbol,
         qty=quantity,
         side=side,
         time_in_force=TimeInForce.DAY
     )
-    order = trading_client.submit_order(market_order_data)
-    qty = round(quantity, 3)
-    current_price = get_latest_price(symbol)
-    stop_loss_price = round(current_price * (1 - stop_loss), 2)  # 3% loss
-    take_profit_price = round(current_price * (1 + take_profit), 2)  # 5% profit
+    
+    try:
+        order = trading_client.submit_order(market_order_data)
+        qty = round(quantity, 3)
+        stop_loss_price = round(current_price * (1 - stop_loss), 2)  # 3% loss
+        take_profit_price = round(current_price * (1 + take_profit), 2)  # 5% profit
 
-    # Log trade details to MongoDB
-    db = mongo_client.trades
-    db.paper.insert_one({
-        'symbol': symbol,
-        'qty': qty,
-        'side': side.name,
-        'time_in_force': TimeInForce.DAY.name,
-        'time': datetime.now(tz=timezone.utc)
-    })
+        # Log trade details to MongoDB
+        db = mongo_client.trades
+        db.paper.insert_one({
+            'symbol': symbol,
+            'qty': qty,
+            'side': side.name,
+            'time_in_force': TimeInForce.DAY.name,
+            'time': datetime.now(tz=timezone.utc)
+        })
 
-    # Track assets as well
-    assets = db.assets_quantities
-    limits = db.assets_limit
+        # Track assets as well
+        assets = db.assets_quantities
+        limits = db.assets_limit
 
-    if side == OrderSide.BUY:
-        assets.update_one({'symbol': symbol}, {'$inc': {'quantity': qty}}, upsert=True)
-        limits.update_one(
-            {'symbol': symbol},
-            {'$set': {'stop_loss_price': stop_loss_price, 'take_profit_price': take_profit_price}},
-            upsert=True
-        )
-    elif side == OrderSide.SELL:
-        assets.update_one({'symbol': symbol}, {'$inc': {'quantity': -qty}}, upsert=True)
-        if assets.find_one({'symbol': symbol})['quantity'] == 0:
-            assets.delete_one({'symbol': symbol})
-            limits.delete_one({'symbol': symbol})
+        if side == OrderSide.BUY:
+            assets.update_one({'symbol': symbol}, {'$inc': {'quantity': qty}}, upsert=True)
+            limits.update_one(
+                {'symbol': symbol},
+                {'$set': {'stop_loss_price': stop_loss_price, 'take_profit_price': take_profit_price}},
+                upsert=True
+            )
+        elif side == OrderSide.SELL:
+            assets.update_one({'symbol': symbol}, {'$inc': {'quantity': -qty}}, upsert=True)
+            if assets.find_one({'symbol': symbol})['quantity'] == 0:
+                assets.delete_one({'symbol': symbol})
+                limits.delete_one({'symbol': symbol})
 
-    return order
+        return order
+    
+    except Exception as e:
+        logging.error(f"Error placing order for {symbol}: {e}")
+        return None
 
 # Helper to retrieve NASDAQ-100 tickers from MongoDB
 def get_ndaq_tickers(mongo_client, FINANCIAL_PREP_API_KEY):
@@ -185,6 +202,71 @@ def get_latest_price(ticker):
     ticker_yahoo = yf.Ticker(ticker)  
     data = ticker_yahoo.history()
     return round(data['Close'].iloc[-1], 2)
+
+
+def check_margin_safety(trading_client, ticker, quantity, current_price, order_side):
+    """
+    Checks if a proposed trade is safe from a margin perspective.
+    
+    Args:
+    - trading_client (TradingClient): Alpaca trading client instance
+    - ticker (str): Stock ticker symbol
+    - quantity (float): Quantity to trade
+    - current_price (float): Current price of the asset
+    - order_side (OrderSide): Buy or sell order
+    
+    Returns:
+    - bool: True if the trade is safe, False otherwise
+    - float: Current margin ratio after the hypothetical trade
+    """
+    try:
+        # Get account info
+        account = trading_client.get_account()
+        
+        # Extract key account values
+        equity = float(account.equity)
+        buying_power = float(account.regt_buying_power)
+        portfolio_value = float(account.portfolio_value)
+        
+        # Calculate current margin cushion
+        if hasattr(account, 'margin_ratio'):
+            current_margin_ratio = float(account.margin_ratio)
+        else:
+            # If margin_ratio is not available, estimate it
+            long_market_value = float(account.long_market_value)
+            short_market_value = float(account.short_market_value)
+            total_positions_value = long_market_value + short_market_value
+            
+            # Avoid division by zero
+            if total_positions_value == 0:
+                current_margin_ratio = 1.0  # No positions, full equity
+            else:
+                current_margin_ratio = equity / total_positions_value
+        
+        # Calculate margin impact of the proposed trade
+        trade_value = quantity * current_price
+        
+        # For buy orders, increase the position value
+        if order_side == OrderSide.BUY:
+            new_position_value = float(account.long_market_value) + trade_value
+            new_margin_ratio = equity / (new_position_value + float(account.short_market_value))
+        # For sell orders, decrease the position value
+        else:  # OrderSide.SELL
+            new_position_value = max(0, float(account.long_market_value) - trade_value)
+            new_margin_ratio = equity / (new_position_value + float(account.short_market_value)) if (new_position_value + float(account.short_market_value)) > 0 else 1.0
+        
+        # Check if the new margin ratio is above our minimum threshold
+        is_safe = new_margin_ratio >= min_margin_ratio
+        
+        logging.info(f"Margin check for {ticker} {order_side.name} {quantity} @ ${current_price:.2f}: " 
+                    f"Current ratio: {current_margin_ratio:.4f}, New ratio: {new_margin_ratio:.4f}, Safe: {is_safe}")
+        
+        return is_safe, new_margin_ratio
+        
+    except Exception as e:
+        logging.error(f"Error checking margin safety: {e}")
+        # Default to conservative approach - assume not safe if we can't calculate
+        return False, 0.0
 
 
 def dynamic_period_selector(ticker):
