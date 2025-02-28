@@ -233,5 +233,5 @@ max_short_ratio = float(os.getenv("MAX_SHORT_RATIO", 0.25))  # Max 25% of portfo
 short_liquidity_buffer = float(os.getenv("SHORT_LIQUIDITY_BUFFER", 0.50))  # 50% buffer for short positions
 short_min_margin_ratio = float(os.getenv("SHORT_MIN_MARGIN_RATIO", 0.40))  # 40% min margin for shorts
 short_max_position_size = float(os.getenv("SHORT_MAX_POSITION_SIZE", 5000))  # Max $5000 per short position
-short_stop_loss = float(os.getenv("SHORT_STOP_LOSS", 0.05))  # 5% stop loss for short positions
-short_take_profit = float(os.getenv("SHORT_TAKE_PROFIT", 0.03))  # 3% take profit for short positions
+short_stop_loss = float(os.getenv("SHORT_STOP_LOSS", 0.03))  # 5% stop loss for short positions
+short_take_profit = float(os.getenv("SHORT_TAKE_PROFIT", 0.05))  # 3% take profit for short positions

@@ -224,8 +224,8 @@ def place_order(trading_client, symbol, side, quantity, mongo_client, is_short=F
         if is_short and side == OrderSide.SELL:
             # For short positions, stop loss is price going up, take profit is price going down
             # Use short-specific thresholds
-            stop_loss_price = round(current_price * (1 + short_stop_loss), 2)  # e.g. 5% increase
-            take_profit_price = round(current_price * (1 - short_take_profit), 2)  # e.g. 3% decrease
+            stop_loss_price = round(current_price * (1 + short_stop_loss), 2)  # e.g. 3% increase
+            take_profit_price = round(current_price * (1 - short_take_profit), 2)  # e.g. 5% decrease
         else:
             # For long positions, or when covering shorts
             stop_loss_price = round(current_price * (1 - stop_loss), 2)  # e.g. 3% decrease

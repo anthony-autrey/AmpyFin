@@ -5,3 +5,9 @@ Push to DockerHub:
 
 Run terminal in container:
     docker exec -it ampyfin-rank /bin/sh
+
+To set up fresh instance:
+    COMPOSE_PROFILES=setup,mongo docker compose up
+    ...ensure training data is present at ../training-data/training_results.json on the container
+    ...ensure TRAIN_MODE in .env is set to "push"
+    COMPOSE_PROFILES=train,mongo docker compose up
