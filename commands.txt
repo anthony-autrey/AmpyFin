@@ -13,3 +13,9 @@ To set up fresh instance:
     ...ensure training data is present at ../training-data/training_results.json on the container
     ...ensure TRAIN_MODE in .env is set to "push"
     COMPOSE_PROFILES=train,mongo docker compose up
+
+To see first set of logs:
+    docker logs CONTAINER_NAME 2>&1 | head -n X (where X is the number of logs)
+
+To see recent logs:
+    docker logs -f --tail 100 CONTAINER_NAME 

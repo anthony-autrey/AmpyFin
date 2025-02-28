@@ -15,7 +15,7 @@ from control import (
     stop_loss, take_profit, min_margin_ratio,
     enable_short_selling, max_short_ratio, short_liquidity_buffer,
     short_min_margin_ratio, short_max_position_size, 
-    short_stop_loss, short_take_profit
+    short_stop_loss, short_take_profit, trade_liquidity_limit
 )
 
 # Retry decorator for handling transient errors

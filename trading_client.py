@@ -637,7 +637,7 @@ def process_ticker(ticker, trading_client, data_client, mongo_client, strategy_t
                 decisions_and_quantities.append((decision, quantity, weight))
 
             decision, quantity, buy_weight, sell_weight, hold_weight, short_weight = weighted_majority_decision_and_median_quantity(decisions_and_quantities)
-            console_logger.info(f"📊 {ticker}:\t{decision.upper()} {quantity} @ ${current_price:.2f}\t[B:{buy_weight:.1f} S:{sell_weight:.1f} SH:{short_weight:.1f} H:{hold_weight:.1f}]")
+            console_logger.info(f"📊 {ticker}:\t\t{decision.upper()} {quantity} @ ${current_price:.2f}\t[B:{buy_weight:.1f} S:{sell_weight:.1f} SH:{short_weight:.1f} H:{hold_weight:.1f}]")
 
             # Get info about short positions
             shorts_collection = mongo_client.trades.short_positions
@@ -908,7 +908,6 @@ def main():
                         logging.info(f"Executed BUY order for {ticker} ({buy_type}): {order}")
                     else:
                         console_logger.error(f"❌ Order failed: {ticker} BUY {quantity}")
-                        logging.warning(f"Skipped BUY order for {ticker} due to margin safety checks")
                         
                     time.sleep(5)
                     """
@@ -918,7 +917,6 @@ def main():
                     # Track exception to detect patterns
                     is_critical = exception_tracker.record_exception(type(e), str(e), "buy_order_execution")
                     console_logger.error(f"❌ Error occurred while executing buy order: {str(e)}")
-                    logging.error(f"Error executing buy order: {e}")
                     
                     if is_critical:
                         console_logger.error(f"⚠️ Multiple order execution failures detected! System may need attention.")
