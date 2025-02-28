@@ -5,6 +5,7 @@ from zoneinfo import ZoneInfo
 import time
 from datetime import datetime, timedelta
 from helper_files.client_helper import place_order, get_ndaq_tickers, market_status, strategies, get_latest_price, get_mongo_client
+from control import enable_short_selling, max_short_ratio, short_liquidity_buffer
 from alpaca.trading.client import TradingClient
 from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
 from alpaca.data.historical.stock import StockHistoricalDataClient
@@ -42,17 +43,20 @@ logging.basicConfig(
 
 def weighted_majority_decision_and_median_quantity(decisions_and_quantities):  
     """  
-    Determines the majority decision (buy, sell, or hold) and returns the weighted median quantity for the chosen action.  
-    Groups 'strong buy' with 'buy' and 'strong sell' with 'sell'.
+    Determines the majority decision (buy, sell, hold, or short) and returns the weighted median quantity for the chosen action.  
+    Groups 'strong buy' with 'buy' and distinguishes between 'sell' and 'short'.
     Applies weights to quantities based on strategy coefficients.  
     """  
     buy_decisions = ['buy', 'strong buy']  
-    sell_decisions = ['sell', 'strong sell']  
+    sell_decisions = ['sell']
+    short_decisions = ['short']
 
     weighted_buy_quantities = []
     weighted_sell_quantities = []
+    weighted_short_quantities = []
     buy_weight = 0
     sell_weight = 0
+    short_weight = 0
     hold_weight = 0
     
     # Process decisions with weights
@@ -63,16 +67,21 @@ def weighted_majority_decision_and_median_quantity(decisions_and_quantities):
         elif decision in sell_decisions:
             weighted_sell_quantities.extend([quantity])
             sell_weight += weight
+        elif decision in short_decisions:
+            weighted_short_quantities.extend([quantity])
+            short_weight += weight
         elif decision == 'hold':
             hold_weight += weight
     
     # Determine the majority decision based on the highest accumulated weight
-    if buy_weight > sell_weight and buy_weight > hold_weight:
-        return 'buy', median(weighted_buy_quantities) if weighted_buy_quantities else 0, buy_weight, sell_weight, hold_weight
-    elif sell_weight > buy_weight and sell_weight > hold_weight:
-        return 'sell', median(weighted_sell_quantities) if weighted_sell_quantities else 0, buy_weight, sell_weight, hold_weight
+    if buy_weight > sell_weight and buy_weight > short_weight and buy_weight > hold_weight:
+        return 'buy', median(weighted_buy_quantities) if weighted_buy_quantities else 0, buy_weight, sell_weight, hold_weight, short_weight
+    elif sell_weight > buy_weight and sell_weight > short_weight and sell_weight > hold_weight:
+        return 'sell', median(weighted_sell_quantities) if weighted_sell_quantities else 0, buy_weight, sell_weight, hold_weight, short_weight
+    elif short_weight > buy_weight and short_weight > sell_weight and short_weight > hold_weight and enable_short_selling:
+        return 'short', median(weighted_short_quantities) if weighted_short_quantities else 0, buy_weight, sell_weight, hold_weight, short_weight
     else:
-        return 'hold', 0, buy_weight, sell_weight, hold_weight
+        return 'hold', 0, buy_weight, sell_weight, hold_weight, short_weight
 
 def process_ticker(ticker, trading_client, data_client, mongo_client, strategy_to_coefficient):
     global buy_heap
@@ -105,8 +114,9 @@ def process_ticker(ticker, trading_client, data_client, mongo_client, strategy_t
             portfolio_qty = asset_info['quantity'] if asset_info else 0.0
             print(f"Portfolio quantity for {ticker}: {portfolio_qty}")
 
-            limit_info = limits_collection.find_one({'symbol': ticker})
-            if limit_info:
+            # Check for long position stop-loss/take-profit
+            limit_info = limits_collection.find_one({'symbol': ticker, 'is_short': False})
+            if limit_info and portfolio_qty > 0:
                 stop_loss_price = limit_info['stop_loss_price']
                 take_profit_price = limit_info['take_profit_price']
                 if current_price <= stop_loss_price or current_price >= take_profit_price:
@@ -120,6 +130,27 @@ def process_ticker(ticker, trading_client, data_client, mongo_client, strategy_t
                     else:
                         logging.error(f"Failed to execute SELL order for {ticker} due to stop-loss or take-profit condition")
                         sold = False  # Reset sold flag to allow other sells
+            
+            # Check for short position stop-loss/take-profit
+            shorts_collection = mongo_client.trades.short_positions
+            short_position = shorts_collection.find_one({'symbol': ticker})
+            short_limit_info = limits_collection.find_one({'symbol': ticker, 'is_short': True})
+            
+            if short_position and short_limit_info and enable_short_selling:
+                short_qty = short_position['quantity']
+                stop_loss_price = short_limit_info['stop_loss_price'] 
+                take_profit_price = short_limit_info['take_profit_price']
+                
+                # For short positions, stop loss is when price increases, take profit is when price decreases
+                if current_price >= stop_loss_price or current_price <= take_profit_price:
+                    print(f"Executing BUY to cover {ticker} short position due to stop-loss or take-profit condition")
+                    order = place_order(trading_client, symbol=ticker, side=OrderSide.BUY, quantity=short_qty, mongo_client=mongo_client, is_short=True)
+                    if order:
+                        logging.info(f"Executed BUY to cover short position for {ticker}: {order}")
+                        return
+                    else:
+                        logging.error(f"Failed to execute BUY to cover short position for {ticker}")
+                        # No need to reset sold flag here as it's a buy operation
 
             indicator_tb = mongo_client.IndicatorsDatabase
             indicator_collection = indicator_tb.Indicators
@@ -139,12 +170,19 @@ def process_ticker(ticker, trading_client, data_client, mongo_client, strategy_t
                 weight = strategy_to_coefficient[strategy.__name__]
                 decisions_and_quantities.append((decision, quantity, weight))
 
-            decision, quantity, buy_weight, sell_weight, hold_weight = weighted_majority_decision_and_median_quantity(decisions_and_quantities)
-            print(f"Ticker: {ticker}, Decision: {decision}, Quantity: {quantity}, Weights: Buy: {buy_weight}, Sell: {sell_weight}, Hold: {hold_weight}")
+            decision, quantity, buy_weight, sell_weight, hold_weight, short_weight = weighted_majority_decision_and_median_quantity(decisions_and_quantities)
+            print(f"Ticker: {ticker}, Decision: {decision}, Quantity: {quantity}, Weights: Buy: {buy_weight}, Sell: {sell_weight}, Short: {short_weight}, Hold: {hold_weight}")
+
+            # Get info about short positions
+            shorts_collection = mongo_client.trades.short_positions
+            short_position = shorts_collection.find_one({'symbol': ticker})
+            short_qty = short_position['quantity'] if short_position else 0.0
 
             if decision == "buy" and float(account.regt_buying_power) > trade_liquidity_limit and (((quantity + portfolio_qty) * current_price) / portfolio_value) < trade_asset_limit:
-                heapq.heappush(buy_heap, (-(buy_weight-(sell_weight + (hold_weight * 0.5))), quantity, ticker))
+                # Buy regular positions - same as before
+                heapq.heappush(buy_heap, (-(buy_weight-(sell_weight + short_weight + (hold_weight * 0.5))), quantity, ticker))
             elif decision == "sell" and portfolio_qty > 0:
+                # Sell long positions - same as before
                 print(f"Executing SELL order for {ticker}")
                 print(f"Executing quantity of {quantity} for {ticker}")
                 sold = True
@@ -155,14 +193,37 @@ def process_ticker(ticker, trading_client, data_client, mongo_client, strategy_t
                 else:
                     logging.error(f"Failed to execute SELL order for {ticker}")
                     sold = False  # Reset sold flag to allow other sells
-            elif portfolio_qty == 0.0 and buy_weight > sell_weight and (((quantity + portfolio_qty) * current_price) / portfolio_value) < trade_asset_limit and float(account.regt_buying_power) > trade_liquidity_limit:
+            elif decision == "short" and enable_short_selling and short_qty == 0:
+                # Short selling
+                print(f"Executing SHORT order for {ticker}")
+                print(f"Executing quantity of {quantity} for {ticker}")
+                sold = True
+                quantity = max(quantity, 1)
+                order = place_order(trading_client, symbol=ticker, side=OrderSide.SELL, quantity=quantity, mongo_client=mongo_client, is_short=True)
+                if order:
+                    logging.info(f"Executed SHORT order for {ticker}: {order}")
+                else:
+                    logging.error(f"Failed to execute SHORT order for {ticker}")
+                    sold = False  # Reset sold flag to allow other sells
+            elif decision == "buy" and short_qty > 0:
+                # Buy to cover short positions
+                print(f"Executing BUY to cover SHORT position for {ticker}")
+                cover_qty = min(quantity, short_qty)
+                print(f"Covering quantity of {cover_qty} for {ticker}")
+                order = place_order(trading_client, symbol=ticker, side=OrderSide.BUY, quantity=cover_qty, mongo_client=mongo_client, is_short=True)
+                if order:
+                    logging.info(f"Executed BUY to cover short position for {ticker}: {order}")
+                else:
+                    logging.error(f"Failed to execute BUY to cover short position for {ticker}")
+            elif portfolio_qty == 0.0 and short_qty == 0.0 and buy_weight > (sell_weight + short_weight) and (((quantity + portfolio_qty) * current_price) / portfolio_value) < trade_asset_limit and float(account.regt_buying_power) > trade_liquidity_limit:
+                # Suggestion heap for buying - same logic as before but with added short_weight consideration
                 max_investment = portfolio_value * trade_asset_limit
                 buy_quantity = min(int(max_investment // current_price), int(buying_power // current_price))
                 if buy_weight > suggestion_heap_limit:
                     buy_quantity = max(buy_quantity, 2)
                     buy_quantity = buy_quantity // 2
                     print(f"Suggestions for buying for {ticker} with a weight of {buy_weight} and quantity of {buy_quantity}")
-                    heapq.heappush(suggestion_heap, (-(buy_weight - sell_weight), buy_quantity, ticker))
+                    heapq.heappush(suggestion_heap, (-(buy_weight - (sell_weight + short_weight)), buy_quantity, ticker))
                 else:
                     logging.info(f"Holding for {ticker}, no action taken.")
             else:

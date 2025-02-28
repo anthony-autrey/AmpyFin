@@ -8,7 +8,10 @@ import yfinance as yf
 import sys
 from pathlib import Path
 sys.path.append("..")
-from control import stop_loss, take_profit, min_margin_ratio
+from control import (
+    stop_loss, take_profit, min_margin_ratio,
+    enable_short_selling, max_short_ratio, short_liquidity_buffer
+)
 
 parent_dir = Path(__file__).resolve().parent.parent
 sys.path.append(str(parent_dir))
@@ -44,30 +47,38 @@ def get_mongo_client(mongo_url):
     return MongoClient(mongo_url, tlsCAFile=ca)
 
 # Helper to place an order
-def place_order(trading_client, symbol, side, quantity, mongo_client):
+def place_order(trading_client, symbol, side, quantity, mongo_client, is_short=False):
     """
     Place a market order and log the order to MongoDB.
     Includes margin safety checks to prevent margin calls.
+    Supports both regular buying/selling and short selling.
 
     :param trading_client: The Alpaca trading client instance
     :param symbol: The stock symbol to trade
     :param side: Order side (OrderSide.BUY or OrderSide.SELL)
     :param qty: Quantity to trade
     :param mongo_client: MongoDB client instance
+    :param is_short: Boolean indicating if this is a short sell or buy to cover
     :return: Order result from Alpaca API or None if margin safety check fails
     """
+    # Check if short selling is enabled
+    if is_short and not enable_short_selling:
+        logging.warning(f"Attempted short selling for {symbol} but short selling is disabled. "
+                      f"Enable it by setting ENABLE_SHORT_SELLING=True in your environment.")
+        return None
+    
     current_price = get_latest_price(symbol)
     
-    # For BUY orders, check margin safety first
-    if side == OrderSide.BUY:
-        is_safe, margin_ratio = check_margin_safety(trading_client, symbol, quantity, current_price, side)
-        if not is_safe:
-            logging.warning(f"Margin safety check failed for {symbol} BUY order. "
-                           f"Margin ratio {margin_ratio:.4f} would be below minimum {min_margin_ratio:.4f}. "
-                           f"Order cancelled for safety.")
-            return None
+    # Check margin safety for all orders
+    is_safe, margin_ratio = check_margin_safety(trading_client, symbol, quantity, current_price, side, is_short)
+    if not is_safe:
+        order_type = "SHORT" if is_short else "regular"
+        logging.warning(f"Margin safety check failed for {symbol} {order_type} {side.name} order. "
+                      f"Margin ratio {margin_ratio:.4f} would be below minimum {min_margin_ratio:.4f}. "
+                      f"Order cancelled for safety.")
+        return None
     
-    # If SELL order or margin check passed, proceed with order
+    # Proceed with order
     market_order_data = MarketOrderRequest(
         symbol=symbol,
         qty=quantity,
@@ -78,8 +89,16 @@ def place_order(trading_client, symbol, side, quantity, mongo_client):
     try:
         order = trading_client.submit_order(market_order_data)
         qty = round(quantity, 3)
-        stop_loss_price = round(current_price * (1 - stop_loss), 2)  # 3% loss
-        take_profit_price = round(current_price * (1 + take_profit), 2)  # 5% profit
+        
+        # Calculate stop loss and take profit differently for short vs long positions
+        if is_short and side == OrderSide.SELL:
+            # For short positions, stop loss is price going up, take profit is price going down
+            stop_loss_price = round(current_price * (1 + stop_loss), 2)  # e.g. 3% increase
+            take_profit_price = round(current_price * (1 - take_profit), 2)  # e.g. 5% decrease
+        else:
+            # For long positions, or when covering shorts
+            stop_loss_price = round(current_price * (1 - stop_loss), 2)  # e.g. 3% decrease
+            take_profit_price = round(current_price * (1 + take_profit), 2)  # e.g. 5% increase
 
         # Log trade details to MongoDB
         db = mongo_client.trades
@@ -87,6 +106,7 @@ def place_order(trading_client, symbol, side, quantity, mongo_client):
             'symbol': symbol,
             'qty': qty,
             'side': side.name,
+            'is_short': is_short,
             'time_in_force': TimeInForce.DAY.name,
             'time': datetime.now(tz=timezone.utc)
         })
@@ -94,19 +114,42 @@ def place_order(trading_client, symbol, side, quantity, mongo_client):
         # Track assets as well
         assets = db.assets_quantities
         limits = db.assets_limit
+        shorts = db.short_positions  # New collection for short positions
 
         if side == OrderSide.BUY:
-            assets.update_one({'symbol': symbol}, {'$inc': {'quantity': qty}}, upsert=True)
-            limits.update_one(
-                {'symbol': symbol},
-                {'$set': {'stop_loss_price': stop_loss_price, 'take_profit_price': take_profit_price}},
-                upsert=True
-            )
+            if is_short:
+                # Covering a short position
+                shorts.update_one({'symbol': symbol}, {'$inc': {'quantity': -qty}}, upsert=True)
+                # If covered completely, remove from shorts
+                short_position = shorts.find_one({'symbol': symbol})
+                if short_position and short_position['quantity'] <= 0:
+                    shorts.delete_one({'symbol': symbol})
+                    limits.delete_one({'symbol': symbol, 'is_short': True})
+            else:
+                # Regular buy
+                assets.update_one({'symbol': symbol}, {'$inc': {'quantity': qty}}, upsert=True)
+                limits.update_one(
+                    {'symbol': symbol, 'is_short': False},
+                    {'$set': {'stop_loss_price': stop_loss_price, 'take_profit_price': take_profit_price}},
+                    upsert=True
+                )
         elif side == OrderSide.SELL:
-            assets.update_one({'symbol': symbol}, {'$inc': {'quantity': -qty}}, upsert=True)
-            if assets.find_one({'symbol': symbol})['quantity'] == 0:
-                assets.delete_one({'symbol': symbol})
-                limits.delete_one({'symbol': symbol})
+            if is_short:
+                # Short selling
+                shorts.update_one({'symbol': symbol}, {'$inc': {'quantity': qty}}, upsert=True)
+                limits.update_one(
+                    {'symbol': symbol, 'is_short': True},
+                    {'$set': {'stop_loss_price': stop_loss_price, 'take_profit_price': take_profit_price}},
+                    upsert=True
+                )
+            else:
+                # Regular sell
+                assets.update_one({'symbol': symbol}, {'$inc': {'quantity': -qty}}, upsert=True)
+                # If sold completely, remove from assets
+                asset = assets.find_one({'symbol': symbol})
+                if asset and asset['quantity'] <= 0:
+                    assets.delete_one({'symbol': symbol})
+                    limits.delete_one({'symbol': symbol, 'is_short': False})
 
         return order
     
@@ -204,7 +247,7 @@ def get_latest_price(ticker):
     return round(data['Close'].iloc[-1], 2)
 
 
-def check_margin_safety(trading_client, ticker, quantity, current_price, order_side):
+def check_margin_safety(trading_client, ticker, quantity, current_price, order_side, is_short=False):
     """
     Checks if a proposed trade is safe from a margin perspective.
     
@@ -214,6 +257,7 @@ def check_margin_safety(trading_client, ticker, quantity, current_price, order_s
     - quantity (float): Quantity to trade
     - current_price (float): Current price of the asset
     - order_side (OrderSide): Buy or sell order
+    - is_short (bool): Whether this is a short sell order
     
     Returns:
     - bool: True if the trade is safe, False otherwise
@@ -227,14 +271,35 @@ def check_margin_safety(trading_client, ticker, quantity, current_price, order_s
         equity = float(account.equity)
         buying_power = float(account.regt_buying_power)
         portfolio_value = float(account.portfolio_value)
+        long_market_value = float(account.long_market_value)
+        short_market_value = float(account.short_market_value)
+
+        # For short positions, check if we'd exceed max short ratio
+        if is_short and order_side == OrderSide.SELL:
+            trade_value = quantity * current_price
+            new_short_value = short_market_value + trade_value
+            short_ratio = new_short_value / portfolio_value
+            
+            # Check if this would exceed our maximum short allocation
+            if short_ratio > max_short_ratio:
+                logging.warning(f"Short position for {ticker} would exceed max short ratio "
+                               f"({short_ratio:.2f} > {max_short_ratio:.2f}). Order cancelled.")
+                return False, 0.0
+            
+            # Check if we have enough liquidity buffer for the short
+            required_buffer = trade_value * short_liquidity_buffer
+            available_cash = float(account.cash) - trade_liquidity_limit
+            
+            if available_cash < required_buffer:
+                logging.warning(f"Insufficient liquidity buffer for short position on {ticker}. "
+                               f"Required: ${required_buffer:.2f}, Available: ${available_cash:.2f}")
+                return False, 0.0
         
         # Calculate current margin cushion
         if hasattr(account, 'margin_ratio'):
             current_margin_ratio = float(account.margin_ratio)
         else:
             # If margin_ratio is not available, estimate it
-            long_market_value = float(account.long_market_value)
-            short_market_value = float(account.short_market_value)
             total_positions_value = long_market_value + short_market_value
             
             # Avoid division by zero
@@ -246,19 +311,27 @@ def check_margin_safety(trading_client, ticker, quantity, current_price, order_s
         # Calculate margin impact of the proposed trade
         trade_value = quantity * current_price
         
-        # For buy orders, increase the position value
+        # Handle different order types
         if order_side == OrderSide.BUY:
-            new_position_value = float(account.long_market_value) + trade_value
-            new_margin_ratio = equity / (new_position_value + float(account.short_market_value))
-        # For sell orders, decrease the position value
+            if is_short:  # Covering a short position
+                new_short_value = max(0, short_market_value - trade_value)
+                new_margin_ratio = equity / (long_market_value + new_short_value) if (long_market_value + new_short_value) > 0 else 1.0
+            else:  # Regular buy
+                new_long_value = long_market_value + trade_value
+                new_margin_ratio = equity / (new_long_value + short_market_value) if (new_long_value + short_market_value) > 0 else 1.0
         else:  # OrderSide.SELL
-            new_position_value = max(0, float(account.long_market_value) - trade_value)
-            new_margin_ratio = equity / (new_position_value + float(account.short_market_value)) if (new_position_value + float(account.short_market_value)) > 0 else 1.0
+            if is_short:  # Short selling
+                new_short_value = short_market_value + trade_value
+                new_margin_ratio = equity / (long_market_value + new_short_value) if (long_market_value + new_short_value) > 0 else 1.0
+            else:  # Regular sell
+                new_long_value = max(0, long_market_value - trade_value)
+                new_margin_ratio = equity / (new_long_value + short_market_value) if (new_long_value + short_market_value) > 0 else 1.0
         
         # Check if the new margin ratio is above our minimum threshold
         is_safe = new_margin_ratio >= min_margin_ratio
         
-        logging.info(f"Margin check for {ticker} {order_side.name} {quantity} @ ${current_price:.2f}: " 
+        short_info = "SHORT " if is_short else ""
+        logging.info(f"Margin check for {ticker} {short_info}{order_side.name} {quantity} @ ${current_price:.2f}: " 
                     f"Current ratio: {current_margin_ratio:.4f}, New ratio: {new_margin_ratio:.4f}, Safe: {is_safe}")
         
         return is_safe, new_margin_ratio

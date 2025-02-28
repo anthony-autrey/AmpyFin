@@ -5,7 +5,7 @@ import pandas as pd
 import time
 import sys
 sys.path.append('..')
-from control import trade_asset_limit
+from control import trade_asset_limit, enable_short_selling
 def get_data(ticker, mongo_client, period=None, start_date=None, end_date=None): 
 
    """Retrieve historical data for a given ticker."""  
@@ -52,6 +52,10 @@ def simulate_strategy(strategy, ticker, current_price, historical_data, buying_p
       return 'buy', min(int(max_investment // current_price), int(buying_power // current_price))
    elif action == 'Sell' and portfolio_qty > 0:
       return 'sell', min(portfolio_qty, max(1, int(portfolio_qty * 0.5)))
+   elif action == 'Strong Sell' and enable_short_selling:
+      # Short selling for strong sell signal - with smaller quantities than buying for risk management
+      short_qty = min(int((max_investment * 0.5) // current_price), int(buying_power // current_price))
+      return 'short', max(1, short_qty // 2)  # Smaller position size for shorts
    else:
       return 'hold', 0
 

@@ -218,3 +218,13 @@ min_margin_ratio is the minimum maintenance margin ratio we want to maintain (hi
 Alpaca's minimum maintenance margin requirement is 25%, but we set a higher threshold as a safety buffer.
 """
 min_margin_ratio = float(os.getenv("MIN_MARGIN_RATIO", 0.30))  # 30% minimum margin ratio for safety
+
+"""
+Short selling parameters allow you to control how the system handles short selling
+enable_short_selling: Set to True to allow selling stocks you don't own (shorting)
+max_short_ratio: Maximum percentage of portfolio value that can be allocated to short positions
+short_liquidity_buffer: Additional liquidity buffer required for short positions as percentage of short value
+"""
+enable_short_selling = os.getenv("ENABLE_SHORT_SELLING", "False").lower() in ("true", "1", "yes")
+max_short_ratio = float(os.getenv("MAX_SHORT_RATIO", 0.25))  # Max 25% of portfolio in short positions
+short_liquidity_buffer = float(os.getenv("SHORT_LIQUIDITY_BUFFER", 0.50))  # 50% buffer for short positions
