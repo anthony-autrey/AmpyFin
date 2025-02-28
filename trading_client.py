@@ -1,4 +1,4 @@
-from config_variables import FINANCIAL_PREP_API_KEY, API_KEY, API_SECRET, BASE_URL, MONGO_URL
+from config_variables import FINANCIAL_PREP_API_KEY, API_KEY, API_SECRET, BASE_URL, MONGO_URL, BASELINE_PORTFOLIO_VALUE, BASELINE_SPY, BASELINE_QQQ, BASELINE_VONG, BASELINE_SCHG, BASELINE_IWY
 import json
 from urllib.request import urlopen
 from zoneinfo import ZoneInfo
@@ -322,25 +322,25 @@ def log_portfolio_performance(trading_client, mongo_client, send_alerts=True):
             
             if last_record:
                 baseline = {
-                    "portfolio": last_record.get("portfolio_value", 50000.00),
+                    "portfolio": last_record.get("portfolio_value", BASELINE_PORTFOLIO_VALUE),
                     "indices": last_record.get("indices", {
-                        "SPY": 591.95,    # Default values in case no history exists
-                        "QQQ": 518.58,
-                        "VONG": 380.00,
-                        "SCHG": 92.00,
-                        "IWY": 132.00
+                        "SPY": BASELINE_SPY,
+                        "QQQ": BASELINE_QQQ,
+                        "VONG": BASELINE_VONG,
+                        "SCHG": BASELINE_SCHG,
+                        "IWY": BASELINE_IWY
                     })
                 }
             else:
-                # Default baseline if no previous records - use environment variables
+                # Default baseline if no previous records - use imported variables
                 baseline = {
-                    "portfolio": float(os.getenv("BASELINE_PORTFOLIO_VALUE", 50000.00)),
+                    "portfolio": BASELINE_PORTFOLIO_VALUE,
                     "indices": {
-                        "SPY": float(os.getenv("BASELINE_SPY", 591.95)),
-                        "QQQ": float(os.getenv("BASELINE_QQQ", 518.58)),
-                        "VONG": float(os.getenv("BASELINE_VONG", 380.00)),
-                        "SCHG": float(os.getenv("BASELINE_SCHG", 92.00)),
-                        "IWY": float(os.getenv("BASELINE_IWY", 132.00))
+                        "SPY": BASELINE_SPY,
+                        "QQQ": BASELINE_QQQ,
+                        "VONG": BASELINE_VONG,
+                        "SCHG": BASELINE_SCHG,
+                        "IWY": BASELINE_IWY
                     }
                 }
                 
@@ -852,10 +852,10 @@ def main():
             trades_db = mongo_client.trades
             portfolio_collection = trades_db.portfolio_values
 
-            # Update performance tracking metrics
-            portfolio_collection.update_one({"name" : "portfolio_percentage"}, {"$set": {"portfolio_value": (portfolio_value-50491.13)/50491.13}})
-            portfolio_collection.update_one({"name" : "ndaq_percentage"}, {"$set": {"portfolio_value": (qqq_latest-518.58)/518.58}})
-            portfolio_collection.update_one({"name" : "spy_percentage"}, {"$set": {"portfolio_value": (spy_latest-591.95)/591.95}})
+            # Update performance tracking metrics using baseline values
+            portfolio_collection.update_one({"name" : "portfolio_percentage"}, {"$set": {"portfolio_value": (portfolio_value-BASELINE_PORTFOLIO_VALUE)/BASELINE_PORTFOLIO_VALUE}})
+            portfolio_collection.update_one({"name" : "ndaq_percentage"}, {"$set": {"portfolio_value": (qqq_latest-BASELINE_QQQ)/BASELINE_QQQ}})
+            portfolio_collection.update_one({"name" : "spy_percentage"}, {"$set": {"portfolio_value": (spy_latest-BASELINE_SPY)/BASELINE_SPY}})
 
             console_logger.info(f"📊 Portfolio: ${portfolio_value:.2f} | Buying Power: ${float(account.regt_buying_power):.2f}")
             console_logger.info(f"🔍 Processing {len(ndaq_tickers)} NASDAQ tickers...")
