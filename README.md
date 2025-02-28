@@ -213,8 +213,6 @@ python trading_client.py --report
 # Run a system health check
 python trading_client.py --health
 
-# Start the system in recovery mode (more conservative trading settings)
-python trading_client.py --recovery
 ```
 
 #### Flag Details:
@@ -227,12 +225,6 @@ python trading_client.py --recovery
   - System resources (CPU, memory, disk)
   - Error statistics
   
-- `--recovery`: Starts the system with more conservative trading parameters:
-  - Reduces position sizes by 50%
-  - Increases margin safety buffer by 50%
-  - Raises the threshold for suggested trades
-  - This mode is useful after system failures or during volatile market conditions
-
 ### Using the Training Client
 
 - To train using training_client.py:
@@ -367,11 +359,10 @@ For people looking to do live trading, I suggest training via running ranking_cl
 
 AmpyThropic includes robust fault tolerance features to ensure reliable operation:
 
-### Exception Handling and Recovery
+### Exception Handling
 - **Automatic Retry Logic**: Critical operations like API calls and database queries automatically retry with exponential backoff
 - **Error Pattern Detection**: System monitors error patterns to identify recurring issues
 - **Self-Healing**: Trading system can recover automatically from many types of failures
-- **Recovery Mode**: Start with `--recovery` flag for more conservative operation after system issues
 
 ### System Health Monitoring
 - **Periodic Health Checks**: System automatically runs diagnostics at regular intervals

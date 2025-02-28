@@ -646,7 +646,20 @@ def process_ticker(ticker, trading_client, data_client, mongo_client, strategy_t
             short_position = shorts_collection.find_one({'symbol': ticker})
             short_qty = short_position['quantity'] if short_position else 0.0
 
-            if decision == "buy" and float(account.regt_buying_power) > trade_liquidity_limit and (((quantity + portfolio_qty) * current_price) / portfolio_value) < trade_asset_limit:
+            # Check if we need to cover a short position first
+            if decision == "buy" and short_qty > 0:
+                # Buy to cover short positions
+                console_logger.info(f"🟢 COVER {ticker}: {short_qty} shares @ ${current_price:.2f}")
+                cover_qty = min(quantity, short_qty)
+                order = place_order(trading_client, symbol=ticker, side=OrderSide.BUY, quantity=cover_qty, mongo_client=mongo_client, is_short=True)
+                if order:
+                    console_logger.info(f"✅ Order executed: {ticker} COVER {cover_qty} @ ${current_price:.2f}")
+                    logging.info(f"Executed BUY to cover short position for {ticker}: {order}")
+                else:
+                    console_logger.error(f"❌ Order failed: {ticker} COVER {cover_qty}")
+                    logging.error(f"Failed to execute BUY to cover short position for {ticker}")
+            # Then handle the other decisions
+            elif decision == "buy" and float(account.regt_buying_power) > trade_liquidity_limit and (((quantity + portfolio_qty) * current_price) / portfolio_value) < trade_asset_limit:
                 # Buy regular positions - same as before
                 heapq.heappush(buy_heap, (-(buy_weight-(sell_weight + short_weight + (hold_weight * 0.5))), quantity, ticker))
                 logging.debug(f"Added {ticker} to buy heap with priority {-(buy_weight-(sell_weight + short_weight + (hold_weight * 0.5))):.2f}")
@@ -690,17 +703,6 @@ def process_ticker(ticker, trading_client, data_client, mongo_client, strategy_t
                     console_logger.error(f"❌ Order failed: {ticker} SHORT {quantity}")
                     logging.error(f"Failed to execute SHORT order for {ticker}")
                     sold = False  # Reset sold flag to allow other sells
-            elif decision == "buy" and short_qty > 0:
-                # Buy to cover short positions
-                console_logger.info(f"🟢 COVER {ticker}: {short_qty} shares @ ${current_price:.2f}")
-                cover_qty = min(quantity, short_qty)
-                order = place_order(trading_client, symbol=ticker, side=OrderSide.BUY, quantity=cover_qty, mongo_client=mongo_client, is_short=True)
-                if order:
-                    console_logger.info(f"✅ Order executed: {ticker} COVER {cover_qty} @ ${current_price:.2f}")
-                    logging.info(f"Executed BUY to cover short position for {ticker}: {order}")
-                else:
-                    console_logger.error(f"❌ Order failed: {ticker} COVER {cover_qty}")
-                    logging.error(f"Failed to execute BUY to cover short position for {ticker}")
             elif portfolio_qty == 0.0 and short_qty == 0.0 and buy_weight > (sell_weight + short_weight) and (((quantity + portfolio_qty) * current_price) / portfolio_value) < trade_asset_limit and float(account.regt_buying_power) > trade_liquidity_limit:
                 # Suggestion heap for buying - same logic as before but with added short_weight consideration
                 max_investment = portfolio_value * trade_asset_limit
@@ -1028,7 +1030,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='AmpyThropic Trading System')
     parser.add_argument('--report', action='store_true', help='Generate performance report without running the trading system')
     parser.add_argument('--health', action='store_true', help='Run a system health check')
-    parser.add_argument('--recovery', action='store_true', help='Start the system in recovery mode (more conservative trading)')
     args = parser.parse_args()
     
     # Add psutil to requirements
@@ -1056,16 +1057,5 @@ if __name__ == "__main__":
             console_logger.info(f"{component}: {status_str}")
     else:
         # Run the normal trading system with fault tolerance
-        console_logger.info("🚀 AmpyThropic Trading System - Starting with fault tolerance")
-        if args.recovery:
-            console_logger.info("⚠️ Running in RECOVERY MODE - Using conservative trading settings")
-            # Adjust risk parameters for recovery mode
-            global trade_asset_limit, suggestion_heap_limit, min_margin_ratio
-            trade_asset_limit *= 0.5  # Cut position sizes in half
-            min_margin_ratio *= 1.5   # Increase margin safety buffer
-            suggestion_heap_limit *= 2  # Raise the bar for suggested trades
-        
-        # Run with fault tolerance wrapper
+        console_logger.info("🚀 AmpyThropic Trading System - Starting with fault tolerance")        
         main_with_fault_tolerance()
-
-    
