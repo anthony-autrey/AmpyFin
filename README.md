@@ -71,6 +71,12 @@ This ensures that strategies with better recent performance have a greater influ
 - Logs trades with details like timestamp, stock, and reasoning.
 - Margin trading support with safety checks to prevent margin calls.
 - Configurable margin safety ratio (default: 30%) to maintain a buffer above Alpaca's maintenance margin requirements.
+- Short selling capabilities with additional risk controls:
+  - Configurable maximum short portfolio ratio (default: 25%)
+  - Higher margin safety requirements for short positions (default: 40%)
+  - Position size limits specific to short trades
+  - Customizable stop-loss and take-profit settings for shorts
+  - Option to use regular sell signals for shorting (SHORT_ON_SELL_SIGNALS)
 
 ### 🏆 ranking_client.py
 
