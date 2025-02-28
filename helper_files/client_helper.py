@@ -126,6 +126,7 @@ def get_mongo_client(mongo_url):
             'maxPoolSize': 50,              # Connection pool size
             'minPoolSize': 10,              # Minimum pool size
             'maxIdleTimeMS': 60000,         # Max idle time for connections
+            'uuidRepresentation': 'standard'  # Fix UUID encoding issues
         }
         
         if running_locally:
@@ -459,27 +460,35 @@ def get_latest_price(ticker):
     :param ticker: The stock ticker symbol  
     :return: The latest price of the stock  
     """  
-    try:
-        ticker_yahoo = yf.Ticker(ticker)  
-        data = ticker_yahoo.history()
+    # Use a semaphore to limit concurrent connections to Yahoo Finance
+    import threading
+    # Create a module-level semaphore if it doesn't exist
+    if not hasattr(get_latest_price, '_semaphore'):
+        get_latest_price._semaphore = threading.Semaphore(5)  # limit to 5 concurrent requests
         
-        if data.empty:
-            raise ValueError(f"No data returned for ticker {ticker}")
+    # Acquire the semaphore before making the request
+    with get_latest_price._semaphore:
+        try:
+            ticker_yahoo = yf.Ticker(ticker)  
+            data = ticker_yahoo.history()
             
-        if 'Close' not in data.columns:
-            raise KeyError(f"Close column not found in data for ticker {ticker}")
-            
-        price = data['Close'].iloc[-1]
-        if not (isinstance(price, (int, float)) and price > 0):
-            raise ValueError(f"Invalid price value for {ticker}: {price}")
-            
-        return round(price, 2)
-    except IndexError as e:
-        logging.error(f"IndexError getting price for {ticker}: {e}")
-        raise ValueError(f"Could not get price data for {ticker}") from e
-    except Exception as e:
-        logging.error(f"Unexpected error getting price for {ticker}: {e}")
-        raise
+            if data.empty:
+                raise ValueError(f"No data returned for ticker {ticker}")
+                
+            if 'Close' not in data.columns:
+                raise KeyError(f"Close column not found in data for ticker {ticker}")
+                
+            price = data['Close'].iloc[-1]
+            if not (isinstance(price, (int, float)) and price > 0):
+                raise ValueError(f"Invalid price value for {ticker}: {price}")
+                
+            return round(price, 2)
+        except IndexError as e:
+            logging.error(f"IndexError getting price for {ticker}: {e}")
+            raise ValueError(f"Could not get price data for {ticker}") from e
+        except Exception as e:
+            logging.error(f"Unexpected error getting price for {ticker}: {e}")
+            raise
 
 
 def check_margin_safety(trading_client, ticker, quantity, current_price, order_side, is_short=False):

@@ -9,7 +9,13 @@ sys.path.append('..')
 from control import trade_asset_limit, enable_short_selling
 def get_data(ticker, mongo_client, period=None, start_date=None, end_date=None): 
 
-   """Retrieve historical data for a given ticker."""  
+   """Retrieve historical data for a given ticker."""
+   # Use a semaphore to limit concurrent connections to Yahoo Finance
+   import threading
+   # Create a module-level semaphore if it doesn't exist
+   if not hasattr(get_data, '_semaphore'):
+      get_data._semaphore = threading.Semaphore(5)  # limit to 5 concurrent requests
+
    if period is not None:
       data = None
       while data is None:
@@ -24,9 +30,10 @@ def get_data(ticker, mongo_client, period=None, start_date=None, end_date=None):
                df.set_index('Date', inplace=True)
                return df
             else:
-
-               ticker_obj = yf.Ticker(ticker)
-               data = ticker_obj.history(period=period)
+               # Acquire the semaphore before making the request
+               with get_data._semaphore:
+                  ticker_obj = yf.Ticker(ticker)
+                  data = ticker_obj.history(period=period)
                
                records = data.reset_index().to_dict('records')
                
@@ -40,7 +47,9 @@ def get_data(ticker, mongo_client, period=None, start_date=None, end_date=None):
       return data  
    else:
       try:
-         return yf.Ticker(ticker).history(start=start_date, end=end_date)
+         # Acquire the semaphore before making the request
+         with get_data._semaphore:
+            return yf.Ticker(ticker).history(start=start_date, end=end_date)
       except Exception as e:
          logging.error(f"Error fetching historical data for {ticker} ({start_date} to {end_date}): {e}")
          time.sleep(10)

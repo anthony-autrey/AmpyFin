@@ -228,7 +228,7 @@ short_min_margin_ratio: Higher margin safety requirement for short positions
 short_max_position_size: Absolute dollar limit for any single short position
 short_stop_loss/short_take_profit: Custom exit thresholds for short positions
 """
-enable_short_selling = os.getenv("ENABLE_SHORT_SELLING", "False").lower() in ("true", "1", "yes")
+enable_short_selling = os.getenv("ENABLE_SHORT_SELLING", "True").lower() in ("true", "1", "yes")
 max_short_ratio = float(os.getenv("MAX_SHORT_RATIO", 0.25))  # Max 25% of portfolio in short positions
 short_liquidity_buffer = float(os.getenv("SHORT_LIQUIDITY_BUFFER", 0.50))  # 50% buffer for short positions
 short_min_margin_ratio = float(os.getenv("SHORT_MIN_MARGIN_RATIO", 0.40))  # 40% min margin for shorts
