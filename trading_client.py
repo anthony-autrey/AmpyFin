@@ -636,6 +636,10 @@ def process_ticker(ticker, trading_client, data_client, mongo_client, strategy_t
                 weight = strategy_to_coefficient[strategy.__name__]
                 decisions_and_quantities.append((decision, quantity, weight))
 
+            # Extract buy and sell quantities from decisions for pragmatic trades
+            buy_quantities = [quantity for decision, quantity, _ in decisions_and_quantities if decision == 'buy']
+            short_quantities = [quantity for decision, quantity, _ in decisions_and_quantities if decision == 'short']
+            
             decision, quantity, buy_weight, sell_weight, hold_weight, short_weight = weighted_majority_decision_and_median_quantity(decisions_and_quantities)
             console_logger.info(f"📊 {ticker}:\t\t{decision.upper()} {quantity} @ ${current_price:.2f}\t[B:{buy_weight:.1f} S:{sell_weight:.1f} SH:{short_weight:.1f} H:{hold_weight:.1f}]")
 
@@ -644,12 +648,17 @@ def process_ticker(ticker, trading_client, data_client, mongo_client, strategy_t
             short_position = shorts_collection.find_one({'symbol': ticker})
             short_qty = short_position['quantity'] if short_position else 0.0
 
+            # Calculate quantities that might be needed for pragmatic decisions
+            pragmatic_buy_quantity = median(buy_quantities) if buy_quantities else 0
+            pragmatic_short_quantity = median(short_quantities) if short_quantities else 0
+            
             buy_condition = decision == "buy" and float(account.regt_buying_power) > trade_liquidity_limit and (((quantity + portfolio_qty) * current_price) / portfolio_value) < trade_asset_limit
             # Check for buy condition with less restrictive requirements
             pragmatic_buy_condition = (float(account.regt_buying_power) > (trade_liquidity_limit * additional_buying_power_factor) and
                 buy_weight > (hold_weight * weight_ratio_threshold) and
                 buy_weight > sell_weight and 
-                buy_weight > short_weight)
+                buy_weight > short_weight and
+                pragmatic_buy_quantity > 0)  # Ensure we have a valid quantity
 
             short_condition = decision == "short" and enable_short_selling and short_qty == 0
             # Check for short condition with new less restrictive requirements
@@ -658,7 +667,8 @@ def process_ticker(ticker, trading_client, data_client, mongo_client, strategy_t
                 float(account.regt_buying_power) > (trade_liquidity_limit * additional_buying_power_factor) and
                 short_weight > (hold_weight * weight_ratio_threshold) and
                 short_weight > buy_weight and 
-                short_weight > sell_weight)
+                short_weight > sell_weight and
+                pragmatic_short_quantity > 0)  # Ensure we have a valid quantity
 
             # Check if we need to cover a short position first
             if decision == "buy" and short_qty > 0:
@@ -674,13 +684,17 @@ def process_ticker(ticker, trading_client, data_client, mongo_client, strategy_t
                     logging.error(f"Failed to execute BUY to cover short position for {ticker}")            
             elif buy_condition or pragmatic_buy_condition:
                 buy_type = "standard" if buy_condition else "pragmatic"
-                heapq.heappush(buy_heap, (-(buy_weight-(sell_weight + short_weight + (hold_weight * 0.5))), quantity, ticker, buy_type))
+                # Use appropriate quantity based on condition type
+                actual_quantity = quantity if buy_condition else pragmatic_buy_quantity
+                heapq.heappush(buy_heap, (-(buy_weight-(sell_weight + short_weight + (hold_weight * 0.5))), actual_quantity, ticker, buy_type))
                 logging.debug(f"Added {ticker} to buy heap with priority {-(buy_weight-(sell_weight + short_weight + (hold_weight * 0.5))):.2f} ({buy_type} buy)")        
             elif short_condition or pragmatic_short_condition:
                 short_type = "standard" if short_condition else "pragmatic"
+                # Use appropriate quantity based on condition type
+                actual_quantity = quantity if short_condition else pragmatic_short_quantity
                 # Short selling with asset limit check
                 # Calculate portfolio impact as a percentage of total portfolio value
-                short_position_value = quantity * current_price
+                short_position_value = actual_quantity * current_price
                 short_position_ratio = short_position_value / portfolio_value
                 
                 # Check if this short would exceed our per-ticker asset limit
@@ -690,18 +704,18 @@ def process_ticker(ticker, trading_client, data_client, mongo_client, strategy_t
                     if adjusted_quantity < 1:
                         logging.info(f"Cannot short {ticker}: position would exceed asset limit {trade_asset_limit:.2f} of portfolio")
                         return
-                    quantity = adjusted_quantity
-                    logging.info(f"Adjusted short quantity for {ticker} to {quantity} to stay within asset limit")
+                    actual_quantity = adjusted_quantity
+                    logging.info(f"Adjusted short quantity for {ticker} to {actual_quantity} to stay within asset limit")
                 
-                console_logger.info(f"🔵 SHORT {ticker}: {quantity} shares @ ${current_price:.2f} ({short_type} short)")
+                console_logger.info(f"🔵 SHORT {ticker}: {actual_quantity} shares @ ${current_price:.2f} ({short_type} short)")
                 sold = True
-                quantity = max(quantity, 1)
-                order = place_order(trading_client, symbol=ticker, side=OrderSide.SELL, quantity=quantity, mongo_client=mongo_client, is_short=True)
+                actual_quantity = max(actual_quantity, 1)
+                order = place_order(trading_client, symbol=ticker, side=OrderSide.SELL, quantity=actual_quantity, mongo_client=mongo_client, is_short=True)
                 if order:
-                    console_logger.info(f"✅ Order executed: {ticker} SHORT {quantity} @ ${current_price:.2f}")
+                    console_logger.info(f"✅ Order executed: {ticker} SHORT {actual_quantity} @ ${current_price:.2f}")
                     logging.info(f"Executed SHORT order for {ticker}: {order}")
                 else:
-                    console_logger.error(f"❌ Order failed: {ticker} SHORT {quantity}")
+                    console_logger.error(f"❌ Order failed: {ticker} SHORT {actual_quantity}")
                     logging.error(f"Failed to execute SHORT order for {ticker}")
                     sold = False  # Reset sold flag to allow other sells
             elif decision == "sell" and portfolio_qty > 0:
@@ -977,8 +991,8 @@ def main():
                 early_hour_first_iteration = True
                 post_hour_first_iteration = False
                 logging.info("Market is closed. Performing post-market operations.")
+                console_logger.info("⏱️ Waiting for next market session...")
             
-            console_logger.info("⏱️ Waiting for next market session...")
             time.sleep(30)
         else:
             console_logger.error("❌ Error determining market status")
