@@ -4,6 +4,7 @@ import numpy as np
 import pandas as pd
 import time
 import sys
+import logging
 sys.path.append('..')
 from control import trade_asset_limit, enable_short_selling
 def get_data(ticker, mongo_client, period=None, start_date=None, end_date=None): 
@@ -31,17 +32,17 @@ def get_data(ticker, mongo_client, period=None, start_date=None, end_date=None):
                
                collection.insert_one({"ticker": ticker, "period": period, 'data': records})
                
-               print("Data fetched from Yahoo Finance")
+               logging.debug(f"Data for {ticker} (period: {period}) fetched from Yahoo Finance")
                return data
          except Exception as e:
-            print(f"Error fetching data for {ticker}: {e}")
+            logging.error(f"Error fetching data for {ticker} (period: {period}): {e}")
       
       return data  
    else:
       try:
          return yf.Ticker(ticker).history(start=start_date, end=end_date)
       except Exception as e:
-         print(f"Error fetching data for {ticker}: {e}")
+         logging.error(f"Error fetching historical data for {ticker} ({start_date} to {end_date}): {e}")
          time.sleep(10)
   
 def simulate_strategy(strategy, ticker, current_price, historical_data, buying_power, portfolio_qty, total_portfolio_value):

@@ -331,8 +331,13 @@ def check_margin_safety(trading_client, ticker, quantity, current_price, order_s
         is_safe = new_margin_ratio >= min_margin_ratio
         
         short_info = "SHORT " if is_short else ""
-        logging.info(f"Margin check for {ticker} {short_info}{order_side.name} {quantity} @ ${current_price:.2f}: " 
-                    f"Current ratio: {current_margin_ratio:.4f}, New ratio: {new_margin_ratio:.4f}, Safe: {is_safe}")
+        # Only log at INFO level if it's potentially unsafe, otherwise log at DEBUG level to reduce noise
+        if new_margin_ratio < min_margin_ratio * 1.2:  # Within 20% of the minimum threshold
+            logging.info(f"Margin check for {ticker} {short_info}{order_side.name} {quantity} @ ${current_price:.2f}: " 
+                        f"Current ratio: {current_margin_ratio:.4f}, New ratio: {new_margin_ratio:.4f}, Safe: {is_safe}")
+        else:
+            logging.debug(f"Margin check for {ticker} {short_info}{order_side.name} {quantity} @ ${current_price:.2f}: " 
+                         f"Current ratio: {current_margin_ratio:.4f}, New ratio: {new_margin_ratio:.4f}, Safe: {is_safe}")
         
         return is_safe, new_margin_ratio
         
