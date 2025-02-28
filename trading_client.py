@@ -25,6 +25,7 @@ from strategies.talib_indicators import *
 import threading
 import sys
 import argparse
+from utils.alerting import send_critical_alert, send_error_alert, send_warning_alert, send_info_alert
 
 
 from control import trade_liquidity_limit, trade_asset_limit, suggestion_heap_limit
@@ -87,9 +88,32 @@ class ExceptionStats:
         
         # Log the exception
         logging.error(f"Exception {type_name}: {error_message} | Context: {context}")
+        
+        # Send email alert based on severity
         if self.consecutive_errors[type_name] >= self.critical_error_threshold:
+            error_detail = f"Error type: {type_name}\nMessage: {error_message}\nContext: {context}\nOccurred: {self.consecutive_errors[type_name]} times consecutively"
             logging.critical(f"CRITICAL: {type_name} errors occurring frequently ({self.consecutive_errors[type_name]} times).")
             console_logger.error(f"❌ CRITICAL ERROR: {type_name} occurring repeatedly. System may need attention.")
+            
+            # Send critical alert for repeated errors
+            send_critical_alert(
+                f"Critical Error: {type_name} (Repeated)",
+                error_detail
+            )
+        elif self.consecutive_errors[type_name] > 1:
+            # Send warning alert for consecutive errors
+            error_detail = f"Error type: {type_name}\nMessage: {error_message}\nContext: {context}\nOccurred: {self.consecutive_errors[type_name]} times consecutively"
+            send_warning_alert(
+                f"Repeated Error: {type_name}",
+                error_detail
+            )
+        else:
+            # For first occurrence, just send an error alert
+            error_detail = f"Error type: {type_name}\nMessage: {error_message}\nContext: {context}"
+            send_error_alert(
+                f"System Error: {type_name}",
+                error_detail
+            )
         
         # Return if this is a critical error situation
         return self.consecutive_errors[type_name] >= self.critical_error_threshold
@@ -222,6 +246,31 @@ def check_system_health(trading_client, mongo_client):
         console_logger.warning(f"⚠️ System health: {health_status['status'].upper()}")
         for warning in health_status["warnings"]:
             console_logger.warning(f"  - {warning}")
+        
+        # Send alert for degraded system health
+        warnings_text = "\n".join([f"- {w}" for w in health_status["warnings"]])
+        component_status = "\n".join([
+            f"{name}: {details.get('status', 'unknown')}" 
+            for name, details in health_status["components"].items()
+        ])
+        
+        alert_message = f"""
+System health status: {health_status['status'].upper()}
+
+WARNINGS:
+{warnings_text}
+
+COMPONENT STATUS:
+{component_status}
+
+Total Error Count: {error_summary["total_errors"]}
+        """
+        
+        # Send warning or critical alert based on severity
+        if health_status["status"] == "degraded":
+            send_warning_alert("System Health Degraded", alert_message)
+        else:
+            send_critical_alert("System Health Critical", alert_message)
     else:
         logging.info("System health check: Healthy")
     
@@ -233,7 +282,7 @@ def check_system_health(trading_client, mongo_client):
     
     return health_status
 
-def log_portfolio_performance(trading_client, mongo_client):
+def log_portfolio_performance(trading_client, mongo_client, send_alerts=True):
     """
     Logs the daily performance of our portfolio compared to major indices.
     Compares with SPY, QQQ, VONG, SCHG, and IWY.
@@ -241,6 +290,7 @@ def log_portfolio_performance(trading_client, mongo_client):
     Args:
         trading_client: Alpaca trading client
         mongo_client: MongoDB client
+        send_alerts: Whether to send alerts for significant performance changes
     """
     try:
         # Get current account info
@@ -360,6 +410,46 @@ def log_portfolio_performance(trading_client, mongo_client):
         # Best and Worst
         console_logger.info(f"\nBest vs: {best_index[0]} (+{best_index[1]:.2f}%)")
         console_logger.info(f"Worst vs: {worst_index[0]} ({worst_index[1]:+.2f}%)")
+        
+        # Send performance alerts if enabled
+        if send_alerts:
+            # Significant underperformance alert
+            if portfolio_change < -5.0 or (portfolio_change < 0 and all(portfolio_change < change for change in index_changes.values())):
+                alert_message = f"""
+Portfolio is significantly underperforming:
+Portfolio: {portfolio_change:+.2f}%
+
+Index Comparisons:
+{', '.join([f"{idx}: {chg:+.2f}%" for idx, chg in index_changes.items()])}
+
+Best performing index vs portfolio: {best_index[0]} ({best_index[1]:+.2f}%)
+Worst performing index vs portfolio: {worst_index[0]} ({worst_index[1]:+.2f}%)
+                """
+                send_warning_alert("Portfolio Underperforming", alert_message)
+            
+            # Significant market decline alert
+            elif portfolio_change < -3.0 and all(change < -2.0 for change in index_changes.values()):
+                alert_message = f"""
+Significant market decline detected:
+Portfolio: {portfolio_change:+.2f}%
+
+Index Declines:
+{', '.join([f"{idx}: {chg:+.2f}%" for idx, chg in index_changes.items()])}
+                """
+                send_warning_alert("Market Decline Alert", alert_message)
+            
+            # Exceptional performance alert (positive)
+            elif portfolio_change > 3.0 and all(portfolio_change > change for change in index_changes.values()):
+                alert_message = f"""
+Portfolio is significantly outperforming all indices:
+Portfolio: {portfolio_change:+.2f}%
+
+Index Comparisons:
+{', '.join([f"{idx}: {chg:+.2f}%" for idx, chg in index_changes.items()])}
+
+Best performing index vs portfolio: {best_index[0]} ({best_index[1]:+.2f}%)
+                """
+                send_info_alert("Portfolio Outperforming", alert_message)
         
         # Add YTD performance if available
         try:

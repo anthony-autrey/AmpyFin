@@ -393,6 +393,41 @@ AmpyThropic includes robust fault tolerance features to ensure reliable operatio
 - **MongoDB Diagnostics**: Health data and error statistics stored in MongoDB
 - **Console Output**: Color-coded real-time status with emojis for better readability
 - **Performance Reports**: Comprehensive daily and YTD performance tracking
+- **Email Alerts**: Sends notifications for critical events and performance anomalies
+
+### 📧 Email Alert System
+
+AmpyThropic includes an email alerting system that notifies you of:
+
+1. **System Errors**: Repeated or critical errors that may require attention
+2. **Health Issues**: Degraded system health including connectivity problems
+3. **Performance Anomalies**: Significant underperformance or market declines
+4. **Resource Warnings**: High memory/CPU usage or low disk space
+
+#### Setting Up Gmail SMTP Alerts
+
+1. **Create an App Password** in your Google Account:
+   - Go to your Google Account → Security → App passwords
+   - Select "Mail" and "Other" (custom name: "AmpyThropic")
+   - Copy the generated 16-character password
+
+2. **Configure Your .env File**:
+   ```
+   # Email Alert Configuration
+   ENABLE_EMAIL_ALERTS=True
+   EMAIL_FROM=your.email@gmail.com
+   EMAIL_TO=your.email@gmail.com
+   EMAIL_APP_PASSWORD=your_16_char_app_password
+   SMTP_SERVER=smtp.gmail.com
+   SMTP_PORT=587
+   ALERT_RATE_LIMIT_MINUTES=15
+   ```
+
+3. **Understanding Alert Levels**:
+   - **CRITICAL** 🔴: Immediate attention required (system failure, critical errors)
+   - **ERROR** 🟠: Errors that affect system operation
+   - **WARNING** 🟡: Issues that may lead to problems but aren't critical yet
+   - **INFO** 🔵: Important information (significant outperformance)
 
 ## 🛠️ Contributing
 

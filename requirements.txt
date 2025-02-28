@@ -17,3 +17,4 @@ TA-Lib
 pandas-ta
 seaborn
 psutil
+secure-smtplib
