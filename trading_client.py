@@ -507,10 +507,9 @@ Best performing index vs portfolio: {best_index[0]} ({best_index[1]:+.2f}%)
 def weighted_majority_decision_and_median_quantity(decisions_and_quantities):  
     """  
     Determines the majority decision (buy, sell, hold, or short) and returns the weighted median quantity for the chosen action.  
-    Groups 'strong buy' with 'buy' and distinguishes between 'sell' and 'short'.
     Applies weights to quantities based on strategy coefficients.  
     """  
-    buy_decisions = ['buy', 'strong buy']  
+    buy_decisions = ['buy']  
     sell_decisions = ['sell']
     short_decisions = ['short']
 
@@ -926,7 +925,7 @@ def main():
             buy_heap = []
             suggestion_heap = []
             sold = False
-            console_logger.info("⏱️ Sleeping for 30 seconds before next scan...")
+            console_logger.info("⏱️ Sleeping for 30 seconds...\n")
             time.sleep(30)
 
         elif status == "early_hours":
@@ -951,9 +950,8 @@ def main():
                 console_logger.info(f"✅ Loaded {strategy_count} strategies with coefficients")
                 early_hour_first_iteration = False
                 post_hour_first_iteration = True
-                logging.info("Market is in early hours. Waiting for 30 seconds.")
+                logging.info("⏱️ Market is in early hours. Waiting for market to open...")
             
-            console_logger.info("⏱️ Waiting for market to open...")
             time.sleep(30)
 
         elif status == "closed":

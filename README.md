@@ -76,7 +76,6 @@ This ensures that strategies with better recent performance have a greater influ
   - Higher margin safety requirements for short positions (default: 40%)
   - Position size limits specific to short trades
   - Customizable stop-loss and take-profit settings for shorts
-  - Option to use regular sell signals for shorting (SHORT_ON_SELL_SIGNALS)
 
 ### 🏆 ranking_client.py
 

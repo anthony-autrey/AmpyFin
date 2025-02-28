@@ -235,4 +235,3 @@ short_min_margin_ratio = float(os.getenv("SHORT_MIN_MARGIN_RATIO", 0.40))  # 40%
 short_max_position_size = float(os.getenv("SHORT_MAX_POSITION_SIZE", 5000))  # Max $5000 per short position
 short_stop_loss = float(os.getenv("SHORT_STOP_LOSS", 0.05))  # 5% stop loss for short positions
 short_take_profit = float(os.getenv("SHORT_TAKE_PROFIT", 0.03))  # 3% take profit for short positions
-short_on_sell_signals = os.getenv("SHORT_ON_SELL_SIGNALS", "False").lower() in ("true", "1", "yes")  # Allow shorting on regular sell signals too
