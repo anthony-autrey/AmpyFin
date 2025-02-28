@@ -28,7 +28,7 @@ import argparse
 from utils.alerting import send_critical_alert, send_error_alert, send_warning_alert, send_info_alert
 
 
-from control import trade_liquidity_limit, trade_asset_limit
+from control import trade_liquidity_limit, trade_asset_limit, additional_buying_power_factor, weight_ratio_threshold
 
 buy_heap = []
 sold = False
@@ -644,6 +644,22 @@ def process_ticker(ticker, trading_client, data_client, mongo_client, strategy_t
             short_position = shorts_collection.find_one({'symbol': ticker})
             short_qty = short_position['quantity'] if short_position else 0.0
 
+            buy_condition = decision == "buy" and float(account.regt_buying_power) > trade_liquidity_limit and (((quantity + portfolio_qty) * current_price) / portfolio_value) < trade_asset_limit
+            # Check for buy condition with less restrictive requirements
+            pragmatic_buy_condition = (float(account.regt_buying_power) > (trade_liquidity_limit * additional_buying_power_factor) and
+                buy_weight > (hold_weight * weight_ratio_threshold) and
+                buy_weight > sell_weight and 
+                buy_weight > short_weight)
+
+            short_condition = decision == "short" and enable_short_selling and short_qty == 0
+            # Check for short condition with new less restrictive requirements
+            pragmatic_short_condition = (enable_short_selling and 
+                short_qty == 0 and
+                float(account.regt_buying_power) > (trade_liquidity_limit * additional_buying_power_factor) and
+                short_weight > (hold_weight * weight_ratio_threshold) and
+                short_weight > buy_weight and 
+                short_weight > sell_weight)
+
             # Check if we need to cover a short position first
             if decision == "buy" and short_qty > 0:
                 # Buy to cover short positions
@@ -655,26 +671,13 @@ def process_ticker(ticker, trading_client, data_client, mongo_client, strategy_t
                     logging.info(f"Executed BUY to cover short position for {ticker}: {order}")
                 else:
                     console_logger.error(f"❌ Order failed: {ticker} COVER {cover_qty}")
-                    logging.error(f"Failed to execute BUY to cover short position for {ticker}")
-            # Then handle the other decisions
-            elif decision == "buy" and float(account.regt_buying_power) > trade_liquidity_limit and (((quantity + portfolio_qty) * current_price) / portfolio_value) < trade_asset_limit:
-                # Buy regular positions - same as before
-                heapq.heappush(buy_heap, (-(buy_weight-(sell_weight + short_weight + (hold_weight * 0.5))), quantity, ticker))
-                logging.debug(f"Added {ticker} to buy heap with priority {-(buy_weight-(sell_weight + short_weight + (hold_weight * 0.5))):.2f}")
-            elif decision == "sell" and portfolio_qty > 0:
-                # Sell long positions - same as before
-                console_logger.info(f"🔴 SELL {ticker}: {quantity} shares @ ${current_price:.2f}")
-                sold = True
-                quantity = max(quantity, 1)
-                order = place_order(trading_client, symbol=ticker, side=OrderSide.SELL, quantity=quantity, mongo_client=mongo_client)
-                if order:
-                    console_logger.info(f"✅ Order executed: {ticker} SELL {quantity} @ ${current_price:.2f}")
-                    logging.info(f"Executed SELL order for {ticker}: {order}")
-                else:
-                    console_logger.error(f"❌ Order failed: {ticker} SELL {quantity}")
-                    logging.error(f"Failed to execute SELL order for {ticker}")
-                    sold = False  # Reset sold flag to allow other sells
-            elif decision == "short" and enable_short_selling and short_qty == 0:
+                    logging.error(f"Failed to execute BUY to cover short position for {ticker}")            
+            elif buy_condition or pragmatic_buy_condition:
+                buy_type = "standard" if buy_condition else "pragmatic"
+                heapq.heappush(buy_heap, (-(buy_weight-(sell_weight + short_weight + (hold_weight * 0.5))), quantity, ticker, buy_type))
+                logging.debug(f"Added {ticker} to buy heap with priority {-(buy_weight-(sell_weight + short_weight + (hold_weight * 0.5))):.2f} ({buy_type} buy)")        
+            elif short_condition or pragmatic_short_condition:
+                short_type = "standard" if short_condition else "pragmatic"
                 # Short selling with asset limit check
                 # Calculate portfolio impact as a percentage of total portfolio value
                 short_position_value = quantity * current_price
@@ -690,7 +693,7 @@ def process_ticker(ticker, trading_client, data_client, mongo_client, strategy_t
                     quantity = adjusted_quantity
                     logging.info(f"Adjusted short quantity for {ticker} to {quantity} to stay within asset limit")
                 
-                console_logger.info(f"🔵 SHORT {ticker}: {quantity} shares @ ${current_price:.2f}")
+                console_logger.info(f"🔵 SHORT {ticker}: {quantity} shares @ ${current_price:.2f} ({short_type} short)")
                 sold = True
                 quantity = max(quantity, 1)
                 order = place_order(trading_client, symbol=ticker, side=OrderSide.SELL, quantity=quantity, mongo_client=mongo_client, is_short=True)
@@ -701,6 +704,18 @@ def process_ticker(ticker, trading_client, data_client, mongo_client, strategy_t
                     console_logger.error(f"❌ Order failed: {ticker} SHORT {quantity}")
                     logging.error(f"Failed to execute SHORT order for {ticker}")
                     sold = False  # Reset sold flag to allow other sells
+            elif decision == "sell" and portfolio_qty > 0:
+                console_logger.info(f"🔴 SELL {ticker}: {quantity} shares @ ${current_price:.2f}")
+                sold = True
+                quantity = max(quantity, 1)
+                order = place_order(trading_client, symbol=ticker, side=OrderSide.SELL, quantity=quantity, mongo_client=mongo_client)
+                if order:
+                    console_logger.info(f"✅ Order executed: {ticker} SELL {quantity} @ ${current_price:.2f}")
+                    logging.info(f"Executed SELL order for {ticker}: {order}")
+                else:
+                    console_logger.error(f"❌ Order failed: {ticker} SELL {quantity}")
+                    logging.error(f"Failed to execute SELL order for {ticker}")
+                    sold = False  # Reset sold flag to allow other sells        
             else:
                 logging.debug(f"Holding for {ticker}, no action taken")
         
@@ -849,20 +864,48 @@ def main():
             if buy_heap:
                 console_logger.info(f"📋 Processing {len(buy_heap)} buy candidates...")
                 
-            while buy_heap and float(account.regt_buying_power) > trade_liquidity_limit and sold is False:
+            # We'll check the buying power threshold dynamically based on the buy_type in the loop
+            while buy_heap and sold is False:
                 try:
                     trading_client = TradingClient(API_KEY, API_SECRET)
                     account = trading_client.get_account()
                     buying_power = float(account.regt_buying_power)
                     logging.debug(f"Current buying power: ${buying_power:.2f}")
                     
-                    _, quantity, ticker = heapq.heappop(buy_heap)
-                    console_logger.info(f"🟢 BUY {ticker}: {quantity} shares @ ${get_latest_price(ticker):.2f}")
+                    # Make sure the heap isn't empty
+                    if not buy_heap:
+                        break
+                        
+                    # Peek at the top item first to check if we have enough buying power
+                    heap_item = buy_heap[0]
+                    if len(heap_item) == 4:  # New format with buy_type
+                        _, _, _, buy_type = heap_item
+                    else:
+                        buy_type = "standard"
+                    
+                    # Determine the appropriate buying power threshold based on the buy_type
+                    required_buying_power = (trade_liquidity_limit * additional_buying_power_factor 
+                                           if buy_type == "pragmatic" else trade_liquidity_limit)
+                    
+                    # Check if we have enough buying power
+                    if buying_power <= required_buying_power:
+                        logging.info(f"Insufficient buying power (${buying_power:.2f}) for {buy_type} buy threshold (${required_buying_power:.2f}). Stopping buy processing.")
+                        break
+                    
+                    # If we have enough buying power, pop the item and proceed
+                    heap_item = heapq.heappop(buy_heap)
+                    if len(heap_item) == 4:  # New format with buy_type
+                        _, quantity, ticker, buy_type = heap_item
+                        console_logger.info(f"🟢 BUY {ticker}: {quantity} shares @ ${get_latest_price(ticker):.2f} ({buy_type} buy)")
+                    else:  # Old format without buy_type (for backward compatibility)
+                        _, quantity, ticker = heap_item
+                        buy_type = "standard"
+                        console_logger.info(f"🟢 BUY {ticker}: {quantity} shares @ ${get_latest_price(ticker):.2f}")
                     
                     order = place_order(trading_client, symbol=ticker, side=OrderSide.BUY, quantity=quantity, mongo_client=mongo_client)
                     if order:
                         console_logger.info(f"✅ Order executed: {ticker} BUY {quantity} @ ${get_latest_price(ticker):.2f}")
-                        logging.info(f"Executed BUY order for {ticker}: {order}")
+                        logging.info(f"Executed BUY order for {ticker} ({buy_type}): {order}")
                     else:
                         console_logger.error(f"❌ Order failed: {ticker} BUY {quantity}")
                         logging.warning(f"Skipped BUY order for {ticker} due to margin safety checks")
