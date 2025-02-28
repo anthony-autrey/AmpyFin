@@ -100,7 +100,6 @@ def process_ticker(ticker, trading_client, data_client, mongo_client, strategy_t
             account = trading_client.get_account()
             buying_power = float(account.regt_buying_power)
             portfolio_value = float(account.portfolio_value)
-            cash_to_portfolio_ratio = buying_power / portfolio_value
 
             asset_info = asset_collection.find_one({'symbol': ticker})
             portfolio_qty = asset_info['quantity'] if asset_info else 0.0
@@ -224,7 +223,6 @@ def main():
             account = trading_client.get_account()
             buying_power = float(account.regt_buying_power)
             portfolio_value = float(account.portfolio_value)
-            cash_to_portfolio_ratio = buying_power / portfolio_value
             qqq_latest = get_latest_price('QQQ')
             spy_latest = get_latest_price('SPY')
             buy_heap = []

@@ -69,6 +69,8 @@ This ensures that strategies with better recent performance have a greater influ
 - Executes trades every 60 seconds by default (adjustable based on user).
 - Ensures a minimum spending balance of $15,000 (adjustable based on user) and maintains 30% liquidity (adjustable based on user).
 - Logs trades with details like timestamp, stock, and reasoning.
+- Margin trading support with safety checks to prevent margin calls.
+- Configurable margin safety ratio (default: 30%) to maintain a buffer above Alpaca's maintenance margin requirements.
 
 ### 🏆 ranking_client.py
 
@@ -143,7 +145,7 @@ pip install -r requirements.txt
 
 ### 3️⃣ Configuration
 
-1. **Create `config.py`**:
+1. **Option 1: Create `config.py`**:
    - Copy `templates/config_template.py` to `config.py` and enter your API keys and MongoDB connection string.
     ```python
     FINANCIAL_PREP_API_KEY = "your_fmp_api_key"
@@ -152,6 +154,17 @@ pip install -r requirements.txt
     BASE_URL = "https://paper-api.alpaca.markets"
     MONGO_URL = "your mongo connection string"
     ```
+
+2. **Option 2: Use Environment Variables (Recommended)**:
+   - Copy `.env_template` to `.env` and customize your settings.
+   - All system parameters are configurable through environment variables.
+   - Key parameters include:
+     - API keys and connection strings
+     - Trading parameters (stop loss, take profit)
+     - Liquidity and asset limits
+     - Margin safety parameters
+     - Time delta settings for backtesting
+     - Training parameters and date ranges
 
 ### 4️⃣ API Setup
 
@@ -236,9 +249,9 @@ AmpyFin includes a Dockerfile to automate the installation process and package t
 Before you begin, ensure that [Docker is installed](https://docs.docker.com/get-docker/) on your system.
 
 ### 1️⃣ Create the `.env` File
-1. Copy `templates/.env_template.py` to `.env` and enter your API keys and MongoDB connection string.
+1. Copy `.env_template` to `.env` and enter your API keys and MongoDB connection string.
     ```
-    # Keys
+    # API Keys
     POLYGON_API_KEY=your_polygon_api_key
     FINANCIAL_PREP_API_KEY=your_fmp_api_key
     API_KEY=your_alpaca_api_key
@@ -247,23 +260,35 @@ Before you begin, ensure that [Docker is installed](https://docs.docker.com/get-
     MONGO_URL=mongodb://mongo:27017/db  # Leave this value if running MongoDB in the local Docker service (see below).
     ```
 
-2. (Optional) Customize Training, Ranking, and Trading Controls:
+2. Customize Trading Parameters (all parameters are configurable):
     ```
-    # Modes:
-    # 'train'means training on historical data
-    # 'test' means running running your training results on simulator.
-    # 'live' means running your bot in live ranking mode.
-    # 'push' means pushing your trained bot to the database. This is only available for the ranking client.
-    MODE=train
-
-    # Ranking Controls
-    RANK_LIQUIDITY_LIMIT=15000
-    RANK_ASSET_LIMIT=0.1
-
-    # Trading Controls
+    # Trading Parameters
+    STOP_LOSS=0.03
+    TAKE_PROFIT=0.05
+    
+    # Trading Client Parameters
     TRADE_LIQUIDITY_LIMIT=15000
     TRADE_ASSET_LIMIT=0.1
+    SUGGESTION_HEAP_LIMIT=600000
+    
+    # Margin Safety Parameters
+    MIN_MARGIN_RATIO=0.30
     ```
+
+3. Configure Training and Backtest Settings:
+    ```
+    # Training Client Parameters
+    # Modes: 'train', 'test', 'live', 'push'
+    TRAIN_MODE=test
+    TRAIN_START=2024-01-01
+    TRAIN_END=2025-01-01
+    
+    # Training Cash Parameters
+    TRAIN_START_CASH=50000.00
+    TRAIN_TRADE_LIQUIDITY_LIMIT=15000.00
+    ```
+    
+The system will automatically load these environment variables when starting up. For a complete list of all configurable parameters, see the `.env_template` file.
 
 ### 2️⃣ Build Ampyfin Docker Image and Initialize Database
 
