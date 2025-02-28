@@ -665,7 +665,21 @@ def process_ticker(ticker, trading_client, data_client, mongo_client, strategy_t
                     logging.error(f"Failed to execute SELL order for {ticker}")
                     sold = False  # Reset sold flag to allow other sells
             elif decision == "short" and enable_short_selling and short_qty == 0:
-                # Short selling
+                # Short selling with asset limit check
+                # Calculate portfolio impact as a percentage of total portfolio value
+                short_position_value = quantity * current_price
+                short_position_ratio = short_position_value / portfolio_value
+                
+                # Check if this short would exceed our per-ticker asset limit
+                if short_position_ratio > trade_asset_limit:
+                    # Adjust quantity to stay within limits
+                    adjusted_quantity = int((trade_asset_limit * portfolio_value) / current_price)
+                    if adjusted_quantity < 1:
+                        logging.info(f"Cannot short {ticker}: position would exceed asset limit {trade_asset_limit:.2f} of portfolio")
+                        return
+                    quantity = adjusted_quantity
+                    logging.info(f"Adjusted short quantity for {ticker} to {quantity} to stay within asset limit")
+                
                 console_logger.info(f"🔵 SHORT {ticker}: {quantity} shares @ ${current_price:.2f}")
                 sold = True
                 quantity = max(quantity, 1)

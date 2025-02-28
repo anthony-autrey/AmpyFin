@@ -224,7 +224,14 @@ Short selling parameters allow you to control how the system handles short selli
 enable_short_selling: Set to True to allow selling stocks you don't own (shorting)
 max_short_ratio: Maximum percentage of portfolio value that can be allocated to short positions
 short_liquidity_buffer: Additional liquidity buffer required for short positions as percentage of short value
+short_min_margin_ratio: Higher margin safety requirement for short positions
+short_max_position_size: Absolute dollar limit for any single short position
+short_stop_loss/short_take_profit: Custom exit thresholds for short positions
 """
 enable_short_selling = os.getenv("ENABLE_SHORT_SELLING", "False").lower() in ("true", "1", "yes")
 max_short_ratio = float(os.getenv("MAX_SHORT_RATIO", 0.25))  # Max 25% of portfolio in short positions
 short_liquidity_buffer = float(os.getenv("SHORT_LIQUIDITY_BUFFER", 0.50))  # 50% buffer for short positions
+short_min_margin_ratio = float(os.getenv("SHORT_MIN_MARGIN_RATIO", 0.40))  # 40% min margin for shorts
+short_max_position_size = float(os.getenv("SHORT_MAX_POSITION_SIZE", 5000))  # Max $5000 per short position
+short_stop_loss = float(os.getenv("SHORT_STOP_LOSS", 0.05))  # 5% stop loss for short positions
+short_take_profit = float(os.getenv("SHORT_TAKE_PROFIT", 0.03))  # 3% take profit for short positions

@@ -13,7 +13,9 @@ from pathlib import Path
 sys.path.append("..")
 from control import (
     stop_loss, take_profit, min_margin_ratio,
-    enable_short_selling, max_short_ratio, short_liquidity_buffer
+    enable_short_selling, max_short_ratio, short_liquidity_buffer,
+    short_min_margin_ratio, short_max_position_size, 
+    short_stop_loss, short_take_profit
 )
 
 # Retry decorator for handling transient errors
@@ -221,8 +223,9 @@ def place_order(trading_client, symbol, side, quantity, mongo_client, is_short=F
         # Calculate stop loss and take profit differently for short vs long positions
         if is_short and side == OrderSide.SELL:
             # For short positions, stop loss is price going up, take profit is price going down
-            stop_loss_price = round(current_price * (1 + stop_loss), 2)  # e.g. 3% increase
-            take_profit_price = round(current_price * (1 - take_profit), 2)  # e.g. 5% decrease
+            # Use short-specific thresholds
+            stop_loss_price = round(current_price * (1 + short_stop_loss), 2)  # e.g. 5% increase
+            take_profit_price = round(current_price * (1 - short_take_profit), 2)  # e.g. 3% decrease
         else:
             # For long positions, or when covering shorts
             stop_loss_price = round(current_price * (1 - stop_loss), 2)  # e.g. 3% decrease
@@ -506,9 +509,18 @@ def check_margin_safety(trading_client, ticker, quantity, current_price, order_s
         long_market_value = float(account.long_market_value)
         short_market_value = float(account.short_market_value)
 
-        # For short positions, check if we'd exceed max short ratio
+        # Calculate trade value
+        trade_value = quantity * current_price
+        
+        # For short positions, check if we'd exceed max short ratio and position size
         if is_short and order_side == OrderSide.SELL:
-            trade_value = quantity * current_price
+            # Check position size limit
+            if trade_value > short_max_position_size:
+                logging.warning(f"Short position for {ticker} would exceed max position size "
+                              f"(${trade_value:.2f} > ${short_max_position_size:.2f}). Order cancelled.")
+                return False, 0.0
+            
+            # Check portfolio ratio limit
             new_short_value = short_market_value + trade_value
             short_ratio = new_short_value / portfolio_value
             
@@ -540,10 +552,7 @@ def check_margin_safety(trading_client, ticker, quantity, current_price, order_s
             else:
                 current_margin_ratio = equity / total_positions_value
         
-        # Calculate margin impact of the proposed trade
-        trade_value = quantity * current_price
-        
-        # Handle different order types
+        # Handle different order types to calculate new margin ratio
         if order_side == OrderSide.BUY:
             if is_short:  # Covering a short position
                 new_short_value = max(0, short_market_value - trade_value)
@@ -559,17 +568,22 @@ def check_margin_safety(trading_client, ticker, quantity, current_price, order_s
                 new_long_value = max(0, long_market_value - trade_value)
                 new_margin_ratio = equity / (new_long_value + short_market_value) if (new_long_value + short_market_value) > 0 else 1.0
         
+        # Use different margin thresholds for short vs long positions
+        required_margin_ratio = short_min_margin_ratio if is_short else min_margin_ratio
+        
         # Check if the new margin ratio is above our minimum threshold
-        is_safe = new_margin_ratio >= min_margin_ratio
+        is_safe = new_margin_ratio >= required_margin_ratio
         
         short_info = "SHORT " if is_short else ""
         # Only log at INFO level if it's potentially unsafe, otherwise log at DEBUG level to reduce noise
-        if new_margin_ratio < min_margin_ratio * 1.2:  # Within 20% of the minimum threshold
+        if new_margin_ratio < required_margin_ratio * 1.2:  # Within 20% of the minimum threshold
             logging.info(f"Margin check for {ticker} {short_info}{order_side.name} {quantity} @ ${current_price:.2f}: " 
-                        f"Current ratio: {current_margin_ratio:.4f}, New ratio: {new_margin_ratio:.4f}, Safe: {is_safe}")
+                       f"Current ratio: {current_margin_ratio:.4f}, New ratio: {new_margin_ratio:.4f}, "
+                       f"Threshold: {required_margin_ratio:.4f}, Safe: {is_safe}")
         else:
             logging.debug(f"Margin check for {ticker} {short_info}{order_side.name} {quantity} @ ${current_price:.2f}: " 
-                         f"Current ratio: {current_margin_ratio:.4f}, New ratio: {new_margin_ratio:.4f}, Safe: {is_safe}")
+                        f"Current ratio: {current_margin_ratio:.4f}, New ratio: {new_margin_ratio:.4f}, "
+                        f"Threshold: {required_margin_ratio:.4f}, Safe: {is_safe}")
         
         return is_safe, new_margin_ratio
         
