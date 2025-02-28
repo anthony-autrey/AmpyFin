@@ -566,7 +566,6 @@ def test():
         logging.info("-------------------------------------------------")
 
         current_date += timedelta(days=1)
-        # time.sleep(5)
     
     """
     Calculate metrics and generate tear sheet
