@@ -206,11 +206,6 @@ This will also be reflected in Ta-Lib for suggestion and could also affect ranki
 """
 trade_asset_limit = float(os.getenv("TRADE_ASSET_LIMIT", 0.1))
 
-"""
-suggestion heap is used in case of when the trading system becomes overpragmatic. This is at what buy_weight limit should the ticker be considered for suggestion
-to buy if the system is pragmatic on all other tickers.
-"""
-suggestion_heap_limit = float(os.getenv("SUGGESTION_HEAP_LIMIT", 600000))
 
 """
 Margin safety parameters to ensure we stay within Alpaca's maintenance margin requirements.

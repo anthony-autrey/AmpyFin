@@ -28,10 +28,9 @@ import argparse
 from utils.alerting import send_critical_alert, send_error_alert, send_warning_alert, send_info_alert
 
 
-from control import trade_liquidity_limit, trade_asset_limit, suggestion_heap_limit
+from control import trade_liquidity_limit, trade_asset_limit
 
 buy_heap = []
-suggestion_heap = []
 sold = False
 
 # Set up logging configuration
@@ -547,7 +546,6 @@ def weighted_majority_decision_and_median_quantity(decisions_and_quantities):
 
 def process_ticker(ticker, trading_client, data_client, mongo_client, strategy_to_coefficient):
     global buy_heap
-    global suggestion_heap
     global sold
     if sold is True:
         logging.debug(f"Sold flag is True. Skipping {ticker}.")
@@ -703,17 +701,6 @@ def process_ticker(ticker, trading_client, data_client, mongo_client, strategy_t
                     console_logger.error(f"❌ Order failed: {ticker} SHORT {quantity}")
                     logging.error(f"Failed to execute SHORT order for {ticker}")
                     sold = False  # Reset sold flag to allow other sells
-            elif portfolio_qty == 0.0 and short_qty == 0.0 and buy_weight > (sell_weight + short_weight) and (((quantity + portfolio_qty) * current_price) / portfolio_value) < trade_asset_limit and float(account.regt_buying_power) > trade_liquidity_limit:
-                # Suggestion heap for buying - same logic as before but with added short_weight consideration
-                max_investment = portfolio_value * trade_asset_limit
-                buy_quantity = min(int(max_investment // current_price), int(buying_power // current_price))
-                if buy_weight > suggestion_heap_limit:
-                    buy_quantity = max(buy_quantity, 2)
-                    buy_quantity = buy_quantity // 2
-                    logging.debug(f"Adding {ticker} to suggestion heap with weight {buy_weight:.2f} and quantity {buy_quantity}")
-                    heapq.heappush(suggestion_heap, (-(buy_weight - (sell_weight + short_weight)), buy_quantity, ticker))
-                else:
-                    logging.debug(f"Holding for {ticker}, weight {buy_weight:.2f} below threshold {suggestion_heap_limit}")
             else:
                 logging.debug(f"Holding for {ticker}, no action taken")
         
@@ -741,7 +728,6 @@ def main():
     console_logger.info("🚀 AmpyThropic Trading System Starting")
     logging.info("Trading mode is live.")
     global buy_heap
-    global suggestion_heap
     global sold
     ndaq_tickers = []
     early_hour_first_iteration = True
@@ -833,7 +819,6 @@ def main():
             qqq_latest = get_latest_price('QQQ')
             spy_latest = get_latest_price('SPY')
             buy_heap = []
-            suggestion_heap = []
 
             trades_db = mongo_client.trades
             portfolio_collection = trades_db.portfolio_values
@@ -857,45 +842,30 @@ def main():
             for thread in threads:
                 thread.join()
 
-            # Process buy orders from heaps
+            # Process buy orders from heap
             trading_client = TradingClient(API_KEY, API_SECRET)
             account = trading_client.get_account()
             
             if buy_heap:
                 console_logger.info(f"📋 Processing {len(buy_heap)} buy candidates...")
-            elif suggestion_heap:
-                console_logger.info(f"📋 Processing {len(suggestion_heap)} suggestion candidates...")
                 
-            while (buy_heap or suggestion_heap) and float(account.regt_buying_power) > trade_liquidity_limit and sold is False:
+            while buy_heap and float(account.regt_buying_power) > trade_liquidity_limit and sold is False:
                 try:
                     trading_client = TradingClient(API_KEY, API_SECRET)
                     account = trading_client.get_account()
                     buying_power = float(account.regt_buying_power)
                     logging.debug(f"Current buying power: ${buying_power:.2f}")
                     
-                    if buy_heap and buying_power > trade_liquidity_limit:
-                        _, quantity, ticker = heapq.heappop(buy_heap)
-                        console_logger.info(f"🟢 BUY {ticker}: {quantity} shares @ ${get_latest_price(ticker):.2f}")
-                        
-                        order = place_order(trading_client, symbol=ticker, side=OrderSide.BUY, quantity=quantity, mongo_client=mongo_client)
-                        if order:
-                            console_logger.info(f"✅ Order executed: {ticker} BUY {quantity} @ ${get_latest_price(ticker):.2f}")
-                            logging.info(f"Executed BUY order for {ticker}: {order}")
-                        else:
-                            console_logger.error(f"❌ Order failed: {ticker} BUY {quantity}")
-                            logging.warning(f"Skipped BUY order for {ticker} due to margin safety checks")
-                        
-                    elif suggestion_heap and buying_power > trade_liquidity_limit:
-                        _, quantity, ticker = heapq.heappop(suggestion_heap)
-                        console_logger.info(f"🟡 SUGGEST BUY {ticker}: {quantity} shares @ ${get_latest_price(ticker):.2f}")
-                        
-                        order = place_order(trading_client, symbol=ticker, side=OrderSide.BUY, quantity=quantity, mongo_client=mongo_client)
-                        if order:
-                            console_logger.info(f"✅ Order executed: {ticker} BUY {quantity} @ ${get_latest_price(ticker):.2f}")
-                            logging.info(f"Executed BUY order from suggestion heap for {ticker}: {order}")
-                        else:
-                            console_logger.error(f"❌ Order failed: {ticker} BUY {quantity}")
-                            logging.warning(f"Skipped BUY order for {ticker} due to margin safety checks")
+                    _, quantity, ticker = heapq.heappop(buy_heap)
+                    console_logger.info(f"🟢 BUY {ticker}: {quantity} shares @ ${get_latest_price(ticker):.2f}")
+                    
+                    order = place_order(trading_client, symbol=ticker, side=OrderSide.BUY, quantity=quantity, mongo_client=mongo_client)
+                    if order:
+                        console_logger.info(f"✅ Order executed: {ticker} BUY {quantity} @ ${get_latest_price(ticker):.2f}")
+                        logging.info(f"Executed BUY order for {ticker}: {order}")
+                    else:
+                        console_logger.error(f"❌ Order failed: {ticker} BUY {quantity}")
+                        logging.warning(f"Skipped BUY order for {ticker} due to margin safety checks")
                         
                     time.sleep(5)
                     """
@@ -925,7 +895,6 @@ def main():
             
             # Reset state for next cycle
             buy_heap = []
-            suggestion_heap = []
             sold = False
             console_logger.info("⏱️ Sleeping for 30 seconds...\n")
             time.sleep(30)
