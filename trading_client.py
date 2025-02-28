@@ -637,7 +637,7 @@ def process_ticker(ticker, trading_client, data_client, mongo_client, strategy_t
                 decisions_and_quantities.append((decision, quantity, weight))
 
             decision, quantity, buy_weight, sell_weight, hold_weight, short_weight = weighted_majority_decision_and_median_quantity(decisions_and_quantities)
-            console_logger.info(f"📊 {ticker}: {decision.upper()} {quantity} @ ${current_price:.2f} [B:{buy_weight:.1f} S:{sell_weight:.1f} SH:{short_weight:.1f} H:{hold_weight:.1f}]")
+            console_logger.info(f"📊 {ticker}:\t{decision.upper()} {quantity} @ ${current_price:.2f}\t[B:{buy_weight:.1f} S:{sell_weight:.1f} SH:{short_weight:.1f} H:{hold_weight:.1f}]")
 
             # Get info about short positions
             shorts_collection = mongo_client.trades.short_positions
@@ -829,7 +829,7 @@ def main():
             portfolio_collection.update_one({"name" : "spy_percentage"}, {"$set": {"portfolio_value": (spy_latest-591.95)/591.95}})
 
             console_logger.info(f"📊 Portfolio: ${portfolio_value:.2f} | Buying Power: ${float(account.regt_buying_power):.2f}")
-            console_logger.info(f"🔍 Scanning {len(ndaq_tickers)} NASDAQ tickers...")
+            console_logger.info(f"🔍 Processing {len(ndaq_tickers)} NASDAQ tickers...")
             
             threads = []
 

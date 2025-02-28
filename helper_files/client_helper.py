@@ -464,7 +464,7 @@ def get_latest_price(ticker):
     import threading
     # Create a module-level semaphore if it doesn't exist
     if not hasattr(get_latest_price, '_semaphore'):
-        get_latest_price._semaphore = threading.Semaphore(5)  # limit to 5 concurrent requests
+        get_latest_price._semaphore = threading.Semaphore(9)  # limit concurrent requests
         
     # Acquire the semaphore before making the request
     with get_latest_price._semaphore:

@@ -14,7 +14,7 @@ def get_data(ticker, mongo_client, period=None, start_date=None, end_date=None):
    import threading
    # Create a module-level semaphore if it doesn't exist
    if not hasattr(get_data, '_semaphore'):
-      get_data._semaphore = threading.Semaphore(5)  # limit to 5 concurrent requests
+      get_data._semaphore = threading.Semaphore(9)  # limit concurrent requests
 
    if period is not None:
       data = None

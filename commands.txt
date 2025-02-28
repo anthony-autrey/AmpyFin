@@ -3,6 +3,8 @@ Push to DockerHub:
     docker tag ampyfin:3.01 shepherd5pie0/repo:3.01
     docker push shepherd5pie0/repo:3.01
 
+    All together: docker build -t anthropic . && docker tag anthropic shepherd5pie0/repo:anthropic && docker push shepherd5pie0/repo:anthropic
+
 Run terminal in container:
     docker exec -it ampyfin-rank /bin/sh
 
