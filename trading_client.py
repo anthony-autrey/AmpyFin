@@ -53,6 +53,186 @@ console_handler.setFormatter(console_formatter)
 console_logger.addHandler(console_handler)
 console_logger.propagate = False  # Prevent double logging
 
+# Setup exception tracking
+class ExceptionStats:
+    """Class to track exception frequency and patterns"""
+    def __init__(self):
+        self.exceptions = {}  # Maps exception types to counts
+        self.consecutive_errors = {}  # Maps exception types to consecutive occurrence counts
+        self.error_timestamps = {}  # Maps exception types to most recent timestamp
+        self.total_errors = 0
+        self.critical_error_threshold = 5  # Number of consecutive errors before taking action
+        self.error_window = 300  # Time window in seconds to track error frequency
+        
+    def record_exception(self, exception_type, error_message, context=None):
+        """Record an exception occurrence"""
+        now = time.time()
+        type_name = exception_type.__name__
+        
+        # Update counts
+        if type_name not in self.exceptions:
+            self.exceptions[type_name] = 1
+            self.consecutive_errors[type_name] = 1
+            self.error_timestamps[type_name] = [now]
+        else:
+            self.exceptions[type_name] += 1
+            self.consecutive_errors[type_name] += 1
+            self.error_timestamps[type_name].append(now)
+            
+            # Clean up old timestamps
+            self.error_timestamps[type_name] = [ts for ts in self.error_timestamps[type_name] 
+                                              if now - ts <= self.error_window]
+        
+        self.total_errors += 1
+        
+        # Log the exception
+        logging.error(f"Exception {type_name}: {error_message} | Context: {context}")
+        if self.consecutive_errors[type_name] >= self.critical_error_threshold:
+            logging.critical(f"CRITICAL: {type_name} errors occurring frequently ({self.consecutive_errors[type_name]} times).")
+            console_logger.error(f"❌ CRITICAL ERROR: {type_name} occurring repeatedly. System may need attention.")
+        
+        # Return if this is a critical error situation
+        return self.consecutive_errors[type_name] >= self.critical_error_threshold
+        
+    def reset_consecutive(self, exception_type):
+        """Reset consecutive error counter for a specific exception type"""
+        type_name = exception_type.__name__
+        if type_name in self.consecutive_errors:
+            self.consecutive_errors[type_name] = 0
+            
+    def get_error_frequency(self, exception_type):
+        """Get frequency of errors of a specific type in the error window"""
+        type_name = exception_type.__name__
+        if type_name not in self.error_timestamps:
+            return 0
+        
+        # Count errors in the time window
+        now = time.time()
+        recent_errors = [ts for ts in self.error_timestamps[type_name] if now - ts <= self.error_window]
+        return len(recent_errors)
+    
+    def get_summary(self):
+        """Get a summary of all recorded exceptions"""
+        return {
+            'total_errors': self.total_errors,
+            'exception_counts': self.exceptions.copy(),
+            'consecutive_errors': self.consecutive_errors.copy()
+        }
+
+# Instantiate the exception tracker
+exception_tracker = ExceptionStats()
+
+def check_system_health(trading_client, mongo_client):
+    """
+    Checks overall system health by verifying connectivity to critical services
+    and monitoring system resources.
+    
+    Args:
+        trading_client: Alpaca trading client
+        mongo_client: MongoDB client
+    
+    Returns:
+        dict: Health status information
+    """
+    health_status = {
+        "timestamp": datetime.now().isoformat(),
+        "status": "healthy",  # Default to healthy
+        "components": {},
+        "error_count": exception_tracker.total_errors,
+        "warnings": []
+    }
+    
+    # Check Alpaca API connection
+    try:
+        # Light API call to check connectivity
+        account = trading_client.get_account()
+        health_status["components"]["alpaca_api"] = {
+            "status": "connected",
+            "account_status": account.status,
+            "last_equity": float(account.equity)
+        }
+    except Exception as e:
+        health_status["components"]["alpaca_api"] = {
+            "status": "error",
+            "error": str(e)
+        }
+        health_status["status"] = "degraded"
+        health_status["warnings"].append(f"Alpaca API connection issue: {str(e)}")
+    
+    # Check MongoDB connection
+    try:
+        # Light query to check connectivity
+        mongo_client.admin.command('ping')
+        dbs = mongo_client.list_database_names()
+        health_status["components"]["mongodb"] = {
+            "status": "connected",
+            "databases": len(dbs)
+        }
+    except Exception as e:
+        health_status["components"]["mongodb"] = {
+            "status": "error",
+            "error": str(e)
+        }
+        health_status["status"] = "degraded"
+        health_status["warnings"].append(f"MongoDB connection issue: {str(e)}")
+    
+    # Check system resources
+    try:
+        import psutil
+        memory = psutil.virtual_memory()
+        disk = psutil.disk_usage('/')
+        
+        # Check for low resources
+        if memory.percent > 90:
+            health_status["status"] = "degraded"
+            health_status["warnings"].append(f"High memory usage: {memory.percent}%")
+        
+        if disk.percent > 90:
+            health_status["status"] = "degraded"
+            health_status["warnings"].append(f"Low disk space: {disk.percent}% used")
+        
+        health_status["components"]["system"] = {
+            "memory_used_percent": memory.percent,
+            "disk_used_percent": disk.percent,
+            "cpu_used_percent": psutil.cpu_percent(interval=0.1)
+        }
+    except ImportError:
+        health_status["components"]["system"] = {
+            "status": "unknown",
+            "message": "psutil not installed"
+        }
+    except Exception as e:
+        health_status["components"]["system"] = {
+            "status": "error",
+            "error": str(e)
+        }
+    
+    # Check for recent errors
+    error_summary = exception_tracker.get_summary()
+    if error_summary["total_errors"] > 10:
+        health_status["status"] = "degraded"
+        health_status["warnings"].append(f"High error count: {error_summary['total_errors']} errors")
+    
+    # Log system health
+    if health_status["status"] != "healthy":
+        logging.warning(f"System health check: {health_status['status']}")
+        for warning in health_status["warnings"]:
+            logging.warning(f"Health warning: {warning}")
+            
+        console_logger.warning(f"⚠️ System health: {health_status['status'].upper()}")
+        for warning in health_status["warnings"]:
+            console_logger.warning(f"  - {warning}")
+    else:
+        logging.info("System health check: Healthy")
+    
+    # Save health status to MongoDB for historical tracking
+    try:
+        mongo_client.system_health.status.insert_one(health_status)
+    except Exception as e:
+        logging.error(f"Failed to save health status: {e}")
+    
+    return health_status
+
 def log_portfolio_performance(trading_client, mongo_client):
     """
     Logs the daily performance of our portfolio compared to major indices.
@@ -433,7 +613,20 @@ def process_ticker(ticker, trading_client, data_client, mongo_client, strategy_t
                 logging.debug(f"Holding for {ticker}, no action taken")
         
         except Exception as e:
+            # Track exception to detect patterns
+            is_critical = exception_tracker.record_exception(type(e), str(e), f"process_ticker({ticker})")
             logging.error(f"Error processing {ticker}: {e}")
+            
+            # If this is a critical/repeated error, log more details
+            if is_critical:
+                logging.critical(f"CRITICAL: Repeated errors processing {ticker}. Check system stability.")
+                # Send summary to console
+                error_summary = exception_tracker.get_summary()
+                console_logger.error(f"⚠️ System stability warning: Multiple errors detected")
+                console_logger.error(f"  Total errors: {error_summary['total_errors']}")
+                top_errors = sorted(error_summary['exception_counts'].items(), key=lambda x: x[1], reverse=True)[:3]
+                for err_type, count in top_errors:
+                    console_logger.error(f"  {err_type}: {count} occurrences")
 
 def main():
     """
@@ -457,11 +650,42 @@ def main():
     strategy_to_coefficient = {}
     sold = False
     
+    # Track when we last did a health check
+    last_health_check = time.time()
+    health_check_interval = 3600  # 1 hour interval
+    
     # Print short selling status
     if enable_short_selling:
         console_logger.info(f"📢 Short selling is ENABLED (max ratio: {max_short_ratio:.2f}, buffer: {short_liquidity_buffer:.2f})")
     
+    # Run initial health check
+    try:
+        console_logger.info("🔍 Running initial system health check...")
+        health_status = check_system_health(trading_client, mongo_client)
+        if health_status["status"] != "healthy":
+            console_logger.warning(f"⚠️ Initial health check: System health is {health_status['status'].upper()}")
+            for warning in health_status["warnings"]:
+                console_logger.warning(f"  - {warning}")
+        else:
+            console_logger.info("✅ Initial health check passed")
+    except Exception as e:
+        logging.error(f"Error in initial health check: {e}")
+        console_logger.error(f"⚠️ Error in initial health check: {str(e)}")
+    
     while True:
+        # Check if it's time for a health check
+        current_time = time.time()
+        if current_time - last_health_check > health_check_interval:
+            try:
+                health_status = check_system_health(trading_client, mongo_client)
+                last_health_check = current_time
+            except Exception as e:
+                logging.error(f"Error in periodic health check: {e}")
+                
+        # Reset error counters for successful operations
+        if exception_tracker.total_errors > 0:
+            for ex_type in list(exception_tracker.consecutive_errors.keys()):
+                exception_tracker.consecutive_errors[ex_type] = 0
         trading_client = TradingClient(API_KEY, API_SECRET)
         data_client = StockHistoricalDataClient(API_KEY, API_SECRET)
         status = market_status(trading_client)  # Use the helper function for market status
@@ -573,9 +797,26 @@ def main():
                     This is here so order will propage through and we will have an accurate cash balance recorded
                     """
                 except Exception as e:
+                    # Track exception to detect patterns
+                    is_critical = exception_tracker.record_exception(type(e), str(e), "buy_order_execution")
                     console_logger.error(f"❌ Error occurred while executing buy order: {str(e)}")
                     logging.error(f"Error executing buy order: {e}")
-                    break
+                    
+                    if is_critical:
+                        console_logger.error(f"⚠️ Multiple order execution failures detected! System may need attention.")
+                        logging.critical(f"Multiple consecutive order execution failures. Pausing buy operations.")
+                        # Take a longer break to let transient issues resolve
+                        time.sleep(30)
+                    
+                    # Continue to next order instead of breaking out completely, unless it's a critical system error
+                    if isinstance(e, (SystemExit, KeyboardInterrupt)):
+                        raise
+                    if any(fatal_err in str(e).lower() for fatal_err in [
+                        "authentication", "insufficient funds", "account blocked", "account restricted"
+                    ]):
+                        logging.critical(f"Fatal error detected: {e}")
+                        console_logger.error(f"🛑 CRITICAL ERROR: {str(e)}")
+                        break
             
             # Reset state for next cycle
             buy_heap = []
@@ -631,20 +872,98 @@ def main():
             time.sleep(60)
     
 
+def main_with_fault_tolerance():
+    """
+    Wrapper around main() with fault tolerance to handle critical errors
+    and ensure the system keeps running.
+    """
+    # Track consecutive failures
+    failure_count = 0
+    max_failures = 5
+    
+    while True:
+        try:
+            # Reset exception counter before each run
+            exception_tracker.total_errors = 0
+            
+            # Run the main function, which has its own infinite loop
+            main()
+            
+            # If we get here, main() exited (which shouldn't happen normally)
+            logging.critical("Main loop exited unexpectedly. Restarting...")
+            console_logger.error("❌ Trading system exited unexpectedly. Restarting...")
+            
+            # Reset failure count since we've run successfully for some time
+            failure_count = 0
+            
+        except KeyboardInterrupt:
+            logging.info("Keyboard interrupt received. Shutting down...")
+            console_logger.info("👋 Shutting down AmpyThropic Trading System")
+            break
+            
+        except Exception as e:
+            # Track the critical error
+            failure_count += 1
+            is_critical = exception_tracker.record_exception(type(e), str(e), "main_loop")
+            
+            # Log the error
+            logging.critical(f"Critical error in main loop: {e}")
+            console_logger.error(f"🚨 CRITICAL ERROR: {str(e)}")
+            
+            if failure_count >= max_failures:
+                logging.critical(f"Too many consecutive failures ({failure_count}). Exiting.")
+                console_logger.error(f"🛑 System halted after {failure_count} consecutive failures.")
+                break
+                
+            # Wait before restarting
+            backoff_time = min(30 * failure_count, 300)  # Max 5 minutes
+            logging.warning(f"Restarting main loop in {backoff_time} seconds...")
+            console_logger.warning(f"⏱️ Restarting in {backoff_time} seconds...")
+            time.sleep(backoff_time)
+
 if __name__ == "__main__":
     # Parse command line arguments
     parser = argparse.ArgumentParser(description='AmpyThropic Trading System')
     parser.add_argument('--report', action='store_true', help='Generate performance report without running the trading system')
+    parser.add_argument('--health', action='store_true', help='Run a system health check')
+    parser.add_argument('--recovery', action='store_true', help='Start the system in recovery mode (more conservative trading)')
     args = parser.parse_args()
     
+    # Add psutil to requirements
+    try:
+        import psutil
+    except ImportError:
+        logging.warning("psutil not installed. System health monitoring will be limited.")
+        console_logger.warning("⚠️ psutil not installed. Run 'pip install psutil' for better health monitoring.")
+    
+    # Initialize clients for all modes
+    trading_client = TradingClient(API_KEY, API_SECRET)
+    mongo_client = get_mongo_client(MONGO_URL)
+    
     if args.report:
-        # Just generate performance report and exit
+        # Generate performance report and exit
         console_logger.info("🚀 AmpyThropic Trading System - Performance Report Mode")
-        trading_client = TradingClient(API_KEY, API_SECRET)
-        mongo_client = get_mongo_client(MONGO_URL)
         log_portfolio_performance(trading_client, mongo_client)
+    elif args.health:
+        # Run system health check and exit
+        console_logger.info("🚀 AmpyThropic Trading System - Health Check Mode")
+        health_status = check_system_health(trading_client, mongo_client)
+        console_logger.info(f"System Status: {health_status['status'].upper()}")
+        for component, status in health_status['components'].items():
+            status_str = status['status'] if isinstance(status, dict) and 'status' in status else 'unknown'
+            console_logger.info(f"{component}: {status_str}")
     else:
-        # Run the normal trading system
-        main()
+        # Run the normal trading system with fault tolerance
+        console_logger.info("🚀 AmpyThropic Trading System - Starting with fault tolerance")
+        if args.recovery:
+            console_logger.info("⚠️ Running in RECOVERY MODE - Using conservative trading settings")
+            # Adjust risk parameters for recovery mode
+            global trade_asset_limit, suggestion_heap_limit, min_margin_ratio
+            trade_asset_limit *= 0.5  # Cut position sizes in half
+            min_margin_ratio *= 1.5   # Increase margin safety buffer
+            suggestion_heap_limit *= 2  # Raise the bar for suggested trades
+        
+        # Run with fault tolerance wrapper
+        main_with_fault_tolerance()
 
     

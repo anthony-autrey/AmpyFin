@@ -16,3 +16,4 @@ datetime
 TA-Lib
 pandas-ta
 seaborn
+psutil

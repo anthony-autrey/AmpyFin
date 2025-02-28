@@ -1,4 +1,7 @@
 import os
+import functools
+import time
+import random
 from pymongo import MongoClient
 from alpaca.trading.requests import MarketOrderRequest
 from alpaca.trading.enums import OrderSide, TimeInForce
@@ -12,6 +15,60 @@ from control import (
     stop_loss, take_profit, min_margin_ratio,
     enable_short_selling, max_short_ratio, short_liquidity_buffer
 )
+
+# Retry decorator for handling transient errors
+def retry_with_backoff(max_retries=3, initial_backoff=1, max_backoff=30, backoff_factor=2, 
+                      exceptions=(Exception,), on_backoff=None):
+    """
+    Retry decorator with exponential backoff
+    
+    Args:
+        max_retries: Maximum number of retries before giving up
+        initial_backoff: Initial backoff time in seconds
+        max_backoff: Maximum backoff time in seconds
+        backoff_factor: Factor to increase backoff with each retry
+        exceptions: Tuple of exceptions to catch and retry on
+        on_backoff: Optional callback function to call when backing off (fn(exception, retry_count, backoff_time))
+    
+    Returns:
+        Decorated function
+    """
+    def decorator(func):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            retry_count = 0
+            backoff_time = initial_backoff
+            
+            while True:
+                try:
+                    return func(*args, **kwargs)
+                except exceptions as e:
+                    retry_count += 1
+                    
+                    # If we've reached max retries, re-raise the exception
+                    if retry_count > max_retries:
+                        logging.error(f"Max retries ({max_retries}) exceeded for {func.__name__}. Last error: {str(e)}")
+                        raise
+                    
+                    # Add some randomness to avoid thundering herd
+                    jitter = random.uniform(0, 0.1 * backoff_time)
+                    sleep_time = min(backoff_time + jitter, max_backoff)
+                    
+                    # Log the retry attempt
+                    logging.warning(f"Retry {retry_count}/{max_retries} for {func.__name__} after {sleep_time:.2f}s. Error: {str(e)}")
+                    
+                    # Call the backoff callback if provided
+                    if on_backoff:
+                        on_backoff(e, retry_count, sleep_time)
+                    
+                    # Sleep before retrying
+                    time.sleep(sleep_time)
+                    
+                    # Increase backoff for next retry
+                    backoff_time = min(backoff_time * backoff_factor, max_backoff)
+        
+        return wrapper
+    return decorator
 
 parent_dir = Path(__file__).resolve().parent.parent
 sys.path.append(str(parent_dir))
@@ -36,21 +93,71 @@ statistical_functions = [BETA_indicator, CORREL_indicator, LINEARREG_indicator, 
 
 strategies = overlap_studies + momentum_indicators + volume_indicators + cycle_indicators + price_transforms + volatility_indicators + pattern_recognition + statistical_functions
 
-# MongoDB connection helper
+# MongoDB connection helper with retry mechanism
+@retry_with_backoff(max_retries=5, initial_backoff=2, max_backoff=60, 
+                   exceptions=(ConnectionError, TimeoutError, Exception),
+                   on_backoff=lambda e, retry, backoff: logging.warning(f"MongoDB connection attempt {retry} failed: {str(e)}"))
 def get_mongo_client(mongo_url):
-    """Connect to MongoDB and return the client."""
-
-    running_locally = os.getenv("MONGO_URL") == "mongodb://mongo:27017/db"
-    if running_locally:
-        return MongoClient(mongo_url) # TLS not required on the Docker mongo service because it blocks all external requests
+    """
+    Connect to MongoDB with fault tolerance and return the client.
+    Includes retry logic in case of connection errors.
     
-    return MongoClient(mongo_url, tlsCAFile=ca)
+    Args:
+        mongo_url: MongoDB connection URL
+        
+    Returns:
+        MongoDB client instance
+        
+    Raises:
+        ConnectionError: If unable to connect after retries
+    """
+    try:
+        running_locally = os.getenv("MONGO_URL") == "mongodb://mongo:27017/db"
+        
+        # Set client options with proper timeouts and retryable writes
+        client_options = {
+            'connectTimeoutMS': 30000,      # 30 seconds connection timeout
+            'socketTimeoutMS': 60000,       # 60 seconds socket timeout
+            'serverSelectionTimeoutMS': 30000,  # 30 seconds server selection timeout
+            'retryWrites': True,            # Enable retryable writes
+            'w': 'majority',                # Write concern
+            'maxPoolSize': 50,              # Connection pool size
+            'minPoolSize': 10,              # Minimum pool size
+            'maxIdleTimeMS': 60000,         # Max idle time for connections
+        }
+        
+        if running_locally:
+            # TLS not required on the Docker mongo service
+            client = MongoClient(mongo_url, **client_options)
+        else:
+            # Add TLS for non-local connections
+            client = MongoClient(mongo_url, tlsCAFile=ca, **client_options)
+        
+        # Verify connection by making a simple command call
+        client.admin.command('ping')
+        
+        logging.info("Successfully connected to MongoDB")
+        return client
+    
+    except Exception as e:
+        logging.error(f"Error connecting to MongoDB: {str(e)}")
+        if "Authentication failed" in str(e):
+            logging.critical("MongoDB authentication failed. Check credentials.")
+            raise ConnectionError("MongoDB authentication failed") from e
+        elif "timed out" in str(e).lower():
+            logging.error("MongoDB connection timed out")
+            raise TimeoutError("MongoDB connection timed out") from e
+        else:
+            raise ConnectionError(f"Failed to connect to MongoDB: {str(e)}") from e
 
-# Helper to place an order
+# Helper to place an order with fault tolerance
+@retry_with_backoff(max_retries=3, initial_backoff=1, max_backoff=10, 
+                   exceptions=(TimeoutError, ConnectionError),
+                   on_backoff=lambda e, retry, backoff: logging.warning(f"Retrying order placement after error: {str(e)}"))
 def place_order(trading_client, symbol, side, quantity, mongo_client, is_short=False):
     """
-    Place a market order and log the order to MongoDB.
-    Includes margin safety checks to prevent margin calls.
+    Place a market order and log the order to MongoDB with fault tolerance.
+    Includes margin safety checks to prevent margin calls and retry logic for transient errors.
     Supports both regular buying/selling and short selling.
 
     :param trading_client: The Alpaca trading client instance
@@ -61,33 +168,54 @@ def place_order(trading_client, symbol, side, quantity, mongo_client, is_short=F
     :param is_short: Boolean indicating if this is a short sell or buy to cover
     :return: Order result from Alpaca API or None if margin safety check fails
     """
+    # Use a unique trade ID to track this order through retries
+    trade_id = f"{symbol}_{side.name}_{datetime.now().strftime('%Y%m%d%H%M%S%f')}"
+    
     # Check if short selling is enabled
     if is_short and not enable_short_selling:
         logging.warning(f"Attempted short selling for {symbol} but short selling is disabled. "
                       f"Enable it by setting ENABLE_SHORT_SELLING=True in your environment.")
         return None
     
-    current_price = get_latest_price(symbol)
-    
-    # Check margin safety for all orders
-    is_safe, margin_ratio = check_margin_safety(trading_client, symbol, quantity, current_price, side, is_short)
-    if not is_safe:
-        order_type = "SHORT" if is_short else "regular"
-        logging.warning(f"Margin safety check failed for {symbol} {order_type} {side.name} order. "
-                      f"Margin ratio {margin_ratio:.4f} would be below minimum {min_margin_ratio:.4f}. "
-                      f"Order cancelled for safety.")
-        return None
-    
-    # Proceed with order
-    market_order_data = MarketOrderRequest(
-        symbol=symbol,
-        qty=quantity,
-        side=side,
-        time_in_force=TimeInForce.DAY
-    )
-    
     try:
-        order = trading_client.submit_order(market_order_data)
+        current_price = get_latest_price(symbol)
+        
+        # Check margin safety for all orders
+        is_safe, margin_ratio = check_margin_safety(trading_client, symbol, quantity, current_price, side, is_short)
+        if not is_safe:
+            order_type = "SHORT" if is_short else "regular"
+            logging.warning(f"Margin safety check failed for {symbol} {order_type} {side.name} order. "
+                          f"Margin ratio {margin_ratio:.4f} would be below minimum {min_margin_ratio:.4f}. "
+                          f"Order cancelled for safety.")
+            return None
+        
+        # Proceed with order
+        market_order_data = MarketOrderRequest(
+            symbol=symbol,
+            qty=quantity,
+            side=side,
+            time_in_force=TimeInForce.DAY,
+            client_order_id=trade_id  # Use trade_id for idempotency
+        )
+        
+        # Submit the order with exception handling
+        try:
+            order = trading_client.submit_order(market_order_data)
+        except Exception as order_error:
+            # Check if this is a transient error that should be retried
+            error_str = str(order_error).lower()
+            if any(phrase in error_str for phrase in ['timeout', 'connection', 'network', 'temporarily unavailable']):
+                logging.warning(f"Transient error placing order for {symbol}: {order_error}")
+                raise TimeoutError(f"Order placement timeout: {order_error}") from order_error
+            elif 'rate limit' in error_str or 'too many requests' in error_str:
+                logging.warning(f"Rate limit hit when placing order for {symbol}")
+                raise ConnectionError(f"API rate limit exceeded: {order_error}") from order_error
+            else:
+                # Non-transient error, don't retry
+                logging.error(f"Error placing order for {symbol}: {order_error}")
+                return None
+        
+        # Order successfully placed
         qty = round(quantity, 3)
         
         # Calculate stop loss and take profit differently for short vs long positions
@@ -100,61 +228,78 @@ def place_order(trading_client, symbol, side, quantity, mongo_client, is_short=F
             stop_loss_price = round(current_price * (1 - stop_loss), 2)  # e.g. 3% decrease
             take_profit_price = round(current_price * (1 + take_profit), 2)  # e.g. 5% increase
 
-        # Log trade details to MongoDB
-        db = mongo_client.trades
-        db.paper.insert_one({
-            'symbol': symbol,
-            'qty': qty,
-            'side': side.name,
-            'is_short': is_short,
-            'time_in_force': TimeInForce.DAY.name,
-            'time': datetime.now(tz=timezone.utc)
-        })
+        # Log trade details to MongoDB with exception handling
+        try:
+            db = mongo_client.trades
+            
+            # Check if we already logged this trade (in case of retry)
+            existing_trade = db.paper.find_one({'trade_id': trade_id})
+            if not existing_trade:
+                # Only insert if this is not a duplicate
+                db.paper.insert_one({
+                    'trade_id': trade_id,
+                    'symbol': symbol,
+                    'qty': qty,
+                    'side': side.name,
+                    'is_short': is_short,
+                    'time_in_force': TimeInForce.DAY.name,
+                    'time': datetime.now(tz=timezone.utc),
+                    'price': current_price,
+                    'order_id': order.id
+                })
 
-        # Track assets as well
-        assets = db.assets_quantities
-        limits = db.assets_limit
-        shorts = db.short_positions  # New collection for short positions
+                # Track assets as well
+                assets = db.assets_quantities
+                limits = db.assets_limit
+                shorts = db.short_positions  # New collection for short positions
 
-        if side == OrderSide.BUY:
-            if is_short:
-                # Covering a short position
-                shorts.update_one({'symbol': symbol}, {'$inc': {'quantity': -qty}}, upsert=True)
-                # If covered completely, remove from shorts
-                short_position = shorts.find_one({'symbol': symbol})
-                if short_position and short_position['quantity'] <= 0:
-                    shorts.delete_one({'symbol': symbol})
-                    limits.delete_one({'symbol': symbol, 'is_short': True})
-            else:
-                # Regular buy
-                assets.update_one({'symbol': symbol}, {'$inc': {'quantity': qty}}, upsert=True)
-                limits.update_one(
-                    {'symbol': symbol, 'is_short': False},
-                    {'$set': {'stop_loss_price': stop_loss_price, 'take_profit_price': take_profit_price}},
-                    upsert=True
-                )
-        elif side == OrderSide.SELL:
-            if is_short:
-                # Short selling
-                shorts.update_one({'symbol': symbol}, {'$inc': {'quantity': qty}}, upsert=True)
-                limits.update_one(
-                    {'symbol': symbol, 'is_short': True},
-                    {'$set': {'stop_loss_price': stop_loss_price, 'take_profit_price': take_profit_price}},
-                    upsert=True
-                )
-            else:
-                # Regular sell
-                assets.update_one({'symbol': symbol}, {'$inc': {'quantity': -qty}}, upsert=True)
-                # If sold completely, remove from assets
-                asset = assets.find_one({'symbol': symbol})
-                if asset and asset['quantity'] <= 0:
-                    assets.delete_one({'symbol': symbol})
-                    limits.delete_one({'symbol': symbol, 'is_short': False})
+                if side == OrderSide.BUY:
+                    if is_short:
+                        # Covering a short position
+                        shorts.update_one({'symbol': symbol}, {'$inc': {'quantity': -qty}}, upsert=True)
+                        # If covered completely, remove from shorts
+                        short_position = shorts.find_one({'symbol': symbol})
+                        if short_position and short_position['quantity'] <= 0:
+                            shorts.delete_one({'symbol': symbol})
+                            limits.delete_one({'symbol': symbol, 'is_short': True})
+                    else:
+                        # Regular buy
+                        assets.update_one({'symbol': symbol}, {'$inc': {'quantity': qty}}, upsert=True)
+                        limits.update_one(
+                            {'symbol': symbol, 'is_short': False},
+                            {'$set': {'stop_loss_price': stop_loss_price, 'take_profit_price': take_profit_price}},
+                            upsert=True
+                        )
+                elif side == OrderSide.SELL:
+                    if is_short:
+                        # Short selling
+                        shorts.update_one({'symbol': symbol}, {'$inc': {'quantity': qty}}, upsert=True)
+                        limits.update_one(
+                            {'symbol': symbol, 'is_short': True},
+                            {'$set': {'stop_loss_price': stop_loss_price, 'take_profit_price': take_profit_price}},
+                            upsert=True
+                        )
+                    else:
+                        # Regular sell
+                        assets.update_one({'symbol': symbol}, {'$inc': {'quantity': -qty}}, upsert=True)
+                        # If sold completely, remove from assets
+                        asset = assets.find_one({'symbol': symbol})
+                        if asset and asset['quantity'] <= 0:
+                            assets.delete_one({'symbol': symbol})
+                            limits.delete_one({'symbol': symbol, 'is_short': False})
+        except Exception as db_error:
+            # Database error shouldn't invalidate the order
+            logging.error(f"Error updating database for order {trade_id}: {db_error}")
+            # Continue since the order was placed successfully
 
         return order
     
+    except (TimeoutError, ConnectionError) as e:
+        # These will be caught by the retry decorator
+        raise
     except Exception as e:
-        logging.error(f"Error placing order for {symbol}: {e}")
+        # Unexpected error
+        logging.error(f"Unexpected error in place_order for {symbol}: {e}")
         return None
 
 # Helper to retrieve NASDAQ-100 tickers from MongoDB
@@ -209,42 +354,129 @@ def get_ndaq_tickers(mongo_client, FINANCIAL_PREP_API_KEY):
     
     return tickers
 
-# Market status checker helper
+# Market status checker helper with retry logic
+@retry_with_backoff(max_retries=5, initial_backoff=1, max_backoff=15, 
+                   exceptions=(TimeoutError, ConnectionError, Exception),
+                   on_backoff=lambda e, retry, backoff: logging.warning(f"Retrying market status check after error: {str(e)}"))
 def market_status(trading_client):
     """
-    Check market status using the Alpaca Trading API.
+    Check market status using the Alpaca Trading API with fault tolerance.
+    Includes retry logic for transient errors.
 
     :param trading_client: The Alpaca trading client instance
-    :return: Current market status ('open', 'early_hours', 'closed')
+    :return: Current market status ('open', 'early_hours', 'closed', 'error')
     """
     try:
-        # Determine premarket hours by substracting 5.5 hours from next open, resulting in 4am on the next open trading day
-        # See: https://docs.alpaca.markets/docs/orders-at-alpaca#extended-hours-trading
-        status = trading_client.get_clock() 
-        early_hours_start = status.next_open - timedelta(hours=5, minutes=30)
-        current_time = status.timestamp
+        # Cache to prevent excessive API calls if we encounter partial failures
+        cache_file = "/tmp/market_status_cache.json"
+        cache_expiry = 60  # cache validity in seconds
+        
+        # Check if we have a recent cache
+        try:
+            if os.path.exists(cache_file):
+                cache_time = os.path.getmtime(cache_file)
+                if time.time() - cache_time < cache_expiry:
+                    with open(cache_file, 'r') as f:
+                        import json
+                        cached_data = json.load(f)
+                        logging.debug("Using cached market status")
+                        return cached_data.get("status", "error")
+        except Exception as cache_error:
+            logging.debug(f"Error reading cache: {cache_error}")
+        
+        # Make the API call
+        try:
+            # Determine premarket hours by substracting 5.5 hours from next open, resulting in 4am on the next open trading day
+            # See: https://docs.alpaca.markets/docs/orders-at-alpaca#extended-hours-trading
+            status = trading_client.get_clock() 
+            early_hours_start = status.next_open - timedelta(hours=5, minutes=30)
+            current_time = status.timestamp
 
-        if status.is_open:
-            return "open"
-        elif current_time > early_hours_start:
-            return "early_hours"
-        else:
-            return "closed"
+            # Determine market status
+            if status.is_open:
+                result = "open"
+            elif current_time > early_hours_start:
+                result = "early_hours"
+            else:
+                result = "closed"
+                
+            # Cache the result
+            try:
+                with open(cache_file, 'w') as f:
+                    import json
+                    json.dump({"status": result, "timestamp": time.time()}, f)
+            except Exception as write_error:
+                logging.debug(f"Error writing cache: {write_error}")
+                
+            return result
+            
+        except Exception as api_error:
+            error_str = str(api_error).lower()
+            if any(phrase in error_str for phrase in ['timeout', 'connection', 'network', 'temporarily unavailable']):
+                logging.warning(f"Transient error checking market status: {api_error}")
+                raise TimeoutError(f"Market status check timeout: {api_error}") from api_error
+            elif 'rate limit' in error_str or 'too many requests' in error_str:
+                logging.warning(f"Rate limit hit when checking market status")
+                raise ConnectionError(f"API rate limit exceeded: {api_error}") from api_error
+            else:
+                raise
+    
+    except (TimeoutError, ConnectionError) as e:
+        # Will be caught by retry decorator
+        raise
+        
     except Exception as e:
         logging.error(f"Error retrieving market status: {e}")
+        
+        # Check if we have any cached data as fallback
+        try:
+            if os.path.exists(cache_file):
+                with open(cache_file, 'r') as f:
+                    import json
+                    cached_data = json.load(f)
+                    cache_age = time.time() - cached_data.get("timestamp", 0)
+                    # Use cached status if it's not too old (10 minutes max)
+                    if cache_age < 600:
+                        logging.warning(f"Using cached market status ({cache_age:.0f}s old) due to error")
+                        return cached_data.get("status", "error")
+        except Exception:
+            pass
+            
         return "error"
 
 # Helper to get latest price
+@retry_with_backoff(max_retries=3, initial_backoff=1, 
+                  exceptions=(Exception,), 
+                  on_backoff=lambda e, retry, backoff: logging.warning(f"Retrying price fetch for ticker after error: {str(e)}"))
 def get_latest_price(ticker):  
     """  
-    Fetch the latest price for a given stock ticker using yfinance.  
+    Fetch the latest price for a given stock ticker using yfinance with retry logic.
+    Will retry up to 3 times with exponential backoff if the request fails.
     
     :param ticker: The stock ticker symbol  
     :return: The latest price of the stock  
     """  
-    ticker_yahoo = yf.Ticker(ticker)  
-    data = ticker_yahoo.history()
-    return round(data['Close'].iloc[-1], 2)
+    try:
+        ticker_yahoo = yf.Ticker(ticker)  
+        data = ticker_yahoo.history()
+        
+        if data.empty:
+            raise ValueError(f"No data returned for ticker {ticker}")
+            
+        if 'Close' not in data.columns:
+            raise KeyError(f"Close column not found in data for ticker {ticker}")
+            
+        price = data['Close'].iloc[-1]
+        if not (isinstance(price, (int, float)) and price > 0):
+            raise ValueError(f"Invalid price value for {ticker}: {price}")
+            
+        return round(price, 2)
+    except IndexError as e:
+        logging.error(f"IndexError getting price for {ticker}: {e}")
+        raise ValueError(f"Could not get price data for {ticker}") from e
+    except Exception as e:
+        logging.error(f"Unexpected error getting price for {ticker}: {e}")
+        raise
 
 
 def check_margin_safety(trading_client, ticker, quantity, current_price, order_side, is_short=False):

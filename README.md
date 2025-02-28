@@ -185,12 +185,50 @@ pip install -r requirements.txt
 
 ## ⚡ Usage
 
+### Running the Trading and Ranking System
+
 - To run the trading and ranking system, execute on two separate terminals:
 
 ```bash
 python ranking_client.py
 python trading_client.py
 ```
+
+### Command Line Flags for the Trading Client
+
+The trading client supports several command line flags for different operations:
+
+```bash
+# Start the trading system in normal mode
+python trading_client.py
+
+# Generate a performance report without starting the trading system
+python trading_client.py --report
+
+# Run a system health check
+python trading_client.py --health
+
+# Start the system in recovery mode (more conservative trading settings)
+python trading_client.py --recovery
+```
+
+#### Flag Details:
+
+- `--report`: Generates a comprehensive performance report comparing your portfolio to major indices (SPY, QQQ, VONG, SCHG, IWY) with both daily and year-to-date statistics.
+
+- `--health`: Runs a comprehensive system health check that evaluates:
+  - Alpaca API connectivity
+  - MongoDB connectivity
+  - System resources (CPU, memory, disk)
+  - Error statistics
+  
+- `--recovery`: Starts the system with more conservative trading parameters:
+  - Reduces position sizes by 50%
+  - Increases margin safety buffer by 50%
+  - Raises the threshold for suggested trades
+  - This mode is useful after system failures or during volatile market conditions
+
+### Using the Training Client
 
 - To train using training_client.py:
 
@@ -235,6 +273,7 @@ mode = 'push'
 
 ```bash
 python training_client.py
+```
 
 
 ## 🐋 Using Docker (Optional)
@@ -319,10 +358,41 @@ docker compose up -d
 
 For people looking to do live trading, I suggest training via running ranking_client.py for at least two weeks before running the trading system altogether. Or train using training_client.py before executing live trades. This way, you're running with a client that has been trained to a certain extent (with strategies ranked) and is ready to go. Otherwise, you will most likely be buying random stocks.
 
-## 📑 Logging
+## 🛡️ Fault Tolerance Features
+
+AmpyThropic includes robust fault tolerance features to ensure reliable operation:
+
+### Exception Handling and Recovery
+- **Automatic Retry Logic**: Critical operations like API calls and database queries automatically retry with exponential backoff
+- **Error Pattern Detection**: System monitors error patterns to identify recurring issues
+- **Self-Healing**: Trading system can recover automatically from many types of failures
+- **Recovery Mode**: Start with `--recovery` flag for more conservative operation after system issues
+
+### System Health Monitoring
+- **Periodic Health Checks**: System automatically runs diagnostics at regular intervals
+- **Resource Monitoring**: Tracks CPU, memory, and disk usage (requires psutil)
+- **API Connectivity**: Monitors connections to Alpaca and MongoDB
+- **Error Tracking**: Records exception patterns and frequencies
+
+### Resilient Data Operations
+- **Connection Pooling**: Efficient database connection management
+- **Idempotent Operations**: Prevents duplicate orders during retries
+- **Caching Strategies**: Reduces API calls for frequently accessed data
+- **Data Validation**: Validates all external data before processing
+
+### Defensive Trading
+- **Margin Safety**: Prevents trades that would violate margin requirements
+- **Transaction Guards**: Ensures database consistency during trading operations
+- **Rate Limit Protection**: Handles API rate limits gracefully
+- **Critical Error Prevention**: Additional safeguards around high-risk operations
+
+## 📑 Logging and Diagnostics
 
 - **system.log**: Tracks major events like API errors and MongoDB operations.
 - **rank_system.log**: Logs all ranking-related events and updates.
+- **MongoDB Diagnostics**: Health data and error statistics stored in MongoDB
+- **Console Output**: Color-coded real-time status with emojis for better readability
+- **Performance Reports**: Comprehensive daily and YTD performance tracking
 
 ## 🛠️ Contributing
 
