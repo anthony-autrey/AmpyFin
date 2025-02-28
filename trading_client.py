@@ -28,7 +28,7 @@ import argparse
 from utils.alerting import send_critical_alert, send_error_alert, send_warning_alert, send_info_alert
 
 
-from control import trade_liquidity_limit, trade_asset_limit, additional_buying_power_factor, weight_ratio_threshold
+from control import trade_liquidity_limit, trade_asset_limit, pragmatic_buying_power_factor, pragmatic_over_hold_factor
 
 buy_heap = []
 sold = False
@@ -654,8 +654,8 @@ def process_ticker(ticker, trading_client, data_client, mongo_client, strategy_t
             
             buy_condition = decision == "buy" and float(account.regt_buying_power) > trade_liquidity_limit and (((quantity + portfolio_qty) * current_price) / portfolio_value) < trade_asset_limit
             # Check for buy condition with less restrictive requirements
-            pragmatic_buy_condition = (float(account.regt_buying_power) > (trade_liquidity_limit * additional_buying_power_factor) and
-                buy_weight > (hold_weight * weight_ratio_threshold) and
+            pragmatic_buy_condition = (float(account.regt_buying_power) > (trade_liquidity_limit * pragmatic_buying_power_factor) and
+                buy_weight > (hold_weight * pragmatic_over_hold_factor) and
                 buy_weight > sell_weight and 
                 buy_weight > short_weight and
                 pragmatic_buy_quantity > 0)  # Ensure we have a valid quantity
@@ -664,8 +664,8 @@ def process_ticker(ticker, trading_client, data_client, mongo_client, strategy_t
             # Check for short condition with new less restrictive requirements
             pragmatic_short_condition = (enable_short_selling and 
                 short_qty == 0 and
-                float(account.regt_buying_power) > (trade_liquidity_limit * additional_buying_power_factor) and
-                short_weight > (hold_weight * weight_ratio_threshold) and
+                float(account.regt_buying_power) > (trade_liquidity_limit * pragmatic_buying_power_factor) and
+                short_weight > (hold_weight * pragmatic_over_hold_factor) and
                 short_weight > buy_weight and 
                 short_weight > sell_weight and
                 pragmatic_short_quantity > 0)  # Ensure we have a valid quantity
@@ -898,7 +898,7 @@ def main():
                         buy_type = "standard"
                     
                     # Determine the appropriate buying power threshold based on the buy_type
-                    required_buying_power = (trade_liquidity_limit * additional_buying_power_factor 
+                    required_buying_power = (trade_liquidity_limit * pragmatic_buying_power_factor 
                                            if buy_type == "pragmatic" else trade_liquidity_limit)
                     
                     # Check if we have enough buying power

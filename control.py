@@ -207,18 +207,18 @@ This will also be reflected in Ta-Lib for suggestion and could also affect ranki
 trade_asset_limit = float(os.getenv("TRADE_ASSET_LIMIT", 0.1))
 
 """
-additional_buying_power_factor sets the factor of trade_liquidity_limit that should be used as the threshold
+pragmatic_buying_power_factor sets the factor of trade_liquidity_limit that should be used as the threshold
 for allowing additional buys/shorts when weight conditions are met. For example, 1.2 means trades can happen
 if buying power > 1.2 * trade_liquidity_limit. Default is 1.2.
 """
-additional_buying_power_factor = float(os.getenv("ADDITIONAL_BUYING_POWER_FACTOR", 1.2))
+pragmatic_buying_power_factor = float(os.getenv("PRAGMATIC_BUYING_POWER_FACTOR", 1.2))
 
 """
-weight_ratio_threshold is the minimum ratio of buy/short weight compared to hold weight
+pragmatic_over_hold_factor is the minimum ratio of buy/short weight compared to hold weight
 that triggers additional trades when buying power is sufficient. Default is 0.5 (meaning buy/short weight
 should be at least 50% of the hold weight to trigger the trade).
 """
-weight_ratio_threshold = float(os.getenv("WEIGHT_RATIO_THRESHOLD", 0.5))
+pragmatic_over_hold_factor = float(os.getenv("PRAGMATIC_OVER_HOLD_FACTOR", 0.5))
 
 
 """
