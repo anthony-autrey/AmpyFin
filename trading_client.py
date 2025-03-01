@@ -4,7 +4,7 @@ from urllib.request import urlopen
 from zoneinfo import ZoneInfo
 import time
 from datetime import datetime, timedelta
-from helper_files.client_helper import place_order, get_ndaq_tickers, market_status, strategies, get_latest_price, get_mongo_client
+from helper_files.client_helper import place_order, get_ndaq_tickers, market_status, strategies, get_latest_price, get_mongo_client, calculate_safe_quantity
 from control import enable_short_selling, max_short_ratio, short_liquidity_buffer
 import os
 from datetime import date
@@ -578,14 +578,21 @@ def process_ticker(ticker, trading_client, data_client, mongo_client, strategy_t
                     condition = "stop-loss" if current_price <= stop_loss_price else "take-profit"
                     console_logger.info(f"🔴 SELL {ticker}: {portfolio_qty} shares @ ${current_price:.2f} ({condition})")
                     quantity = portfolio_qty
-                    order = place_order(trading_client, symbol=ticker, side=OrderSide.SELL, quantity=quantity, mongo_client=mongo_client)
-                    if order:
-                        console_logger.info(f"✅ Order executed: {ticker} SELL {quantity} @ ${current_price:.2f}")
-                        logging.info(f"Executed SELL order for {ticker}: {order}")
-                        return
+                    # Calculate safe quantity with margin check first
+                    safe_quantity = calculate_safe_quantity(trading_client, ticker, "sell", quantity, current_price)
+                    if safe_quantity > 0:
+                        order = place_order(trading_client, symbol=ticker, side=OrderSide.SELL, quantity=safe_quantity, mongo_client=mongo_client)
+                        if order:
+                            console_logger.info(f"✅ Order executed: {ticker} SELL {safe_quantity} @ ${current_price:.2f}")
+                            logging.info(f"Executed SELL order for {ticker}: {order}")
+                            return
+                        else:
+                            console_logger.error(f"❌ Order failed: {ticker} SELL {safe_quantity}")
+                            logging.error(f"Failed to execute SELL order for {ticker} due to {condition} condition")
+                            sold = False  # Reset sold flag to allow other sells
                     else:
-                        console_logger.error(f"❌ Order failed: {ticker} SELL {quantity}")
-                        logging.error(f"Failed to execute SELL order for {ticker} due to {condition} condition")
+                        console_logger.error(f"❌ Cannot sell {ticker}: No safe quantity found due to margin constraints")
+                        logging.error(f"Margin safety prevented SELL order for {ticker}")
                         sold = False  # Reset sold flag to allow other sells
             
             # Check for short position stop-loss/take-profit
@@ -602,14 +609,21 @@ def process_ticker(ticker, trading_client, data_client, mongo_client, strategy_t
                 if current_price >= stop_loss_price or current_price <= take_profit_price:
                     condition = "stop-loss" if current_price >= stop_loss_price else "take-profit"
                     console_logger.info(f"🟢 COVER {ticker}: {short_qty} shares @ ${current_price:.2f} ({condition})")
-                    order = place_order(trading_client, symbol=ticker, side=OrderSide.BUY, quantity=short_qty, mongo_client=mongo_client, is_short=True)
-                    if order:
-                        console_logger.info(f"✅ Order executed: {ticker} COVER {short_qty} @ ${current_price:.2f}")
-                        logging.info(f"Executed BUY to cover short position for {ticker}: {order}")
-                        return
+                    # Calculate safe quantity for covering short position
+                    safe_quantity = calculate_safe_quantity(trading_client, ticker, "buy", short_qty, current_price)
+                    if safe_quantity > 0:
+                        order = place_order(trading_client, symbol=ticker, side=OrderSide.BUY, quantity=safe_quantity, mongo_client=mongo_client, is_short=True)
+                        if order:
+                            console_logger.info(f"✅ Order executed: {ticker} COVER {safe_quantity} @ ${current_price:.2f}")
+                            logging.info(f"Executed BUY to cover short position for {ticker}: {order}")
+                            return
+                        else:
+                            console_logger.error(f"❌ Order failed: {ticker} COVER {safe_quantity}")
+                            logging.error(f"Failed to execute BUY to cover short position for {ticker} due to {condition} condition")
+                            # No need to reset sold flag here as it's a buy operation
                     else:
-                        console_logger.error(f"❌ Order failed: {ticker} COVER {short_qty}")
-                        logging.error(f"Failed to execute BUY to cover short position for {ticker} due to {condition} condition")
+                        console_logger.error(f"❌ Cannot cover {ticker}: No safe quantity found due to margin constraints")
+                        logging.error(f"Margin safety prevented cover of short position for {ticker}")
                         # No need to reset sold flag here as it's a buy operation
 
             indicator_tb = mongo_client.IndicatorsDatabase
@@ -669,13 +683,38 @@ def process_ticker(ticker, trading_client, data_client, mongo_client, strategy_t
                 # Buy to cover short positions
                 console_logger.info(f"🟢 COVER {ticker}: {short_qty} shares @ ${current_price:.2f}")
                 cover_qty = min(quantity, short_qty)
-                order = place_order(trading_client, symbol=ticker, side=OrderSide.BUY, quantity=cover_qty, mongo_client=mongo_client, is_short=True)
-                if order:
-                    console_logger.info(f"✅ Order executed: {ticker} COVER {cover_qty} @ ${current_price:.2f}")
-                    logging.info(f"Executed BUY to cover short position for {ticker}: {order}")
+                # Calculate safe quantity for covering short position
+                safe_cover_qty = calculate_safe_quantity(trading_client, ticker, "buy", cover_qty, current_price)
+                if safe_cover_qty > 0:
+                    order = place_order(trading_client, symbol=ticker, side=OrderSide.BUY, quantity=safe_cover_qty, mongo_client=mongo_client, is_short=True)
+                    if order:
+                        console_logger.info(f"✅ Order executed: {ticker} COVER {safe_cover_qty} @ ${current_price:.2f}")
+                        logging.info(f"Executed BUY to cover short position for {ticker}: {order}")
+                    else:
+                        console_logger.error(f"❌ Order failed: {ticker} COVER {safe_cover_qty}")
+                        logging.error(f"Failed to execute BUY to cover short position for {ticker}")
                 else:
-                    console_logger.error(f"❌ Order failed: {ticker} COVER {cover_qty}")
-                    logging.error(f"Failed to execute BUY to cover short position for {ticker}")            
+                    console_logger.error(f"❌ Cannot cover {ticker}: No safe quantity found due to margin constraints")
+                    logging.error(f"Margin safety prevented cover of short position for {ticker}")    
+            elif decision == "sell" and portfolio_qty > 0:
+                console_logger.info(f"🔴 SELL {ticker}: {quantity} shares @ ${current_price:.2f}")
+                sold = True
+                quantity = max(quantity, 1)
+                # Calculate safe quantity with margin check first
+                safe_quantity = calculate_safe_quantity(trading_client, ticker, "sell", quantity, current_price)
+                if safe_quantity > 0:
+                    order = place_order(trading_client, symbol=ticker, side=OrderSide.SELL, quantity=safe_quantity, mongo_client=mongo_client)
+                    if order:
+                        console_logger.info(f"✅ Order executed: {ticker} SELL {safe_quantity} @ ${current_price:.2f}")
+                        logging.info(f"Executed SELL order for {ticker}: {order}")
+                    else:
+                        console_logger.error(f"❌ Order failed: {ticker} SELL {safe_quantity}")
+                        logging.error(f"Failed to execute SELL order for {ticker}")
+                        sold = False  # Reset sold flag to allow other sells
+                else:
+                    console_logger.error(f"❌ Cannot sell {ticker}: No safe quantity found due to margin constraints")
+                    logging.error(f"Margin safety prevented SELL order for {ticker}")
+                    sold = False  # Reset sold flag to allow other sells                
             elif buy_condition or pragmatic_buy_condition:
                 buy_type = "standard" if buy_condition else "pragmatic"
                 # Use appropriate quantity based on condition type
@@ -704,26 +743,21 @@ def process_ticker(ticker, trading_client, data_client, mongo_client, strategy_t
                 console_logger.info(f"🔵 SHORT {ticker}: {actual_quantity} shares @ ${current_price:.2f} ({short_type} short)")
                 sold = True
                 actual_quantity = max(actual_quantity, 1)
-                order = place_order(trading_client, symbol=ticker, side=OrderSide.SELL, quantity=actual_quantity, mongo_client=mongo_client, is_short=True)
-                if order:
-                    console_logger.info(f"✅ Order executed: {ticker} SHORT {actual_quantity} @ ${current_price:.2f}")
-                    logging.info(f"Executed SHORT order for {ticker}: {order}")
+                # Calculate safe quantity for short position
+                safe_quantity = calculate_safe_quantity(trading_client, ticker, "short", actual_quantity, current_price)
+                if safe_quantity > 0:
+                    order = place_order(trading_client, symbol=ticker, side=OrderSide.SELL, quantity=safe_quantity, mongo_client=mongo_client, is_short=True)
+                    if order:
+                        console_logger.info(f"✅ Order executed: {ticker} SHORT {safe_quantity} @ ${current_price:.2f}")
+                        logging.info(f"Executed SHORT order for {ticker}: {order}")
+                    else:
+                        console_logger.error(f"❌ Order failed: {ticker} SHORT {safe_quantity}")
+                        logging.error(f"Failed to execute SHORT order for {ticker}")
+                        sold = False  # Reset sold flag to allow other sells
                 else:
-                    console_logger.error(f"❌ Order failed: {ticker} SHORT {actual_quantity}")
-                    logging.error(f"Failed to execute SHORT order for {ticker}")
+                    console_logger.error(f"❌ Cannot short {ticker}: No safe quantity found due to margin constraints")
+                    logging.error(f"Margin safety prevented SHORT order for {ticker}")
                     sold = False  # Reset sold flag to allow other sells
-            elif decision == "sell" and portfolio_qty > 0:
-                console_logger.info(f"🔴 SELL {ticker}: {quantity} shares @ ${current_price:.2f}")
-                sold = True
-                quantity = max(quantity, 1)
-                order = place_order(trading_client, symbol=ticker, side=OrderSide.SELL, quantity=quantity, mongo_client=mongo_client)
-                if order:
-                    console_logger.info(f"✅ Order executed: {ticker} SELL {quantity} @ ${current_price:.2f}")
-                    logging.info(f"Executed SELL order for {ticker}: {order}")
-                else:
-                    console_logger.error(f"❌ Order failed: {ticker} SELL {quantity}")
-                    logging.error(f"Failed to execute SELL order for {ticker}")
-                    sold = False  # Reset sold flag to allow other sells        
             else:
                 logging.debug(f"Holding for {ticker}, no action taken")
         
@@ -910,12 +944,20 @@ def main():
                         buy_type = "standard"
                         console_logger.info(f"🟢 BUY {ticker}: {quantity} shares @ ${get_latest_price(ticker):.2f}")
                     
-                    order = place_order(trading_client, symbol=ticker, side=OrderSide.BUY, quantity=quantity, mongo_client=mongo_client)
-                    if order:
-                        console_logger.info(f"✅ Order executed: {ticker} BUY {quantity} @ ${get_latest_price(ticker):.2f}")
-                        logging.info(f"Executed BUY order for {ticker} ({buy_type}): {order}")
+                    # Get latest price and calculate safe quantity
+                    current_price = get_latest_price(ticker)
+                    safe_quantity = calculate_safe_quantity(trading_client, ticker, "buy", quantity, current_price)
+                    
+                    if safe_quantity > 0:
+                        order = place_order(trading_client, symbol=ticker, side=OrderSide.BUY, quantity=safe_quantity, mongo_client=mongo_client)
+                        if order:
+                            console_logger.info(f"✅ Order executed: {ticker} BUY {safe_quantity} @ ${current_price:.2f}")
+                            logging.info(f"Executed BUY order for {ticker} ({buy_type}): {order}")
+                        else:
+                            console_logger.error(f"❌ Order failed: {ticker} BUY {safe_quantity}")
                     else:
-                        console_logger.error(f"❌ Order failed: {ticker} BUY {quantity}")
+                        console_logger.error(f"❌ Cannot buy {ticker}: No safe quantity found due to margin constraints")
+                        logging.error(f"Margin safety prevented BUY order for {ticker}")
                         
                     time.sleep(5)
                     """

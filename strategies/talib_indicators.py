@@ -66,9 +66,8 @@ def simulate_strategy(strategy, ticker, current_price, historical_data, buying_p
    elif action_lower == 'sell' and portfolio_qty > 0:
       return 'sell', min(portfolio_qty, max(1, int(portfolio_qty * 0.5)))
    elif enable_short_selling and action_lower == 'sell':
-      # Use more conservative position sizing for shorts
-      short_qty = min(int((max_investment * 0.5) // current_price), int(buying_power // current_price))
-      return 'short', max(1, short_qty // 2)  # Smaller position size for shorts
+      short_qty = min(int(max_investment // current_price), int(buying_power // current_price))
+      return 'short', max(1, short_qty)
    else:
       return 'hold', 0
 

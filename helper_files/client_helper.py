@@ -160,7 +160,6 @@ def get_mongo_client(mongo_url):
 def place_order(trading_client, symbol, side, quantity, mongo_client, is_short=False):
     """
     Place a market order and log the order to MongoDB with fault tolerance.
-    Includes margin safety checks to prevent margin calls and retry logic for transient errors.
     Supports both regular buying/selling and short selling.
 
     :param trading_client: The Alpaca trading client instance
@@ -169,7 +168,7 @@ def place_order(trading_client, symbol, side, quantity, mongo_client, is_short=F
     :param qty: Quantity to trade
     :param mongo_client: MongoDB client instance
     :param is_short: Boolean indicating if this is a short sell or buy to cover
-    :return: Order result from Alpaca API or None if margin safety check fails
+    :return: Order result from Alpaca API or None if error occurs
     """
     # Use a unique trade ID to track this order through retries
     trade_id = f"{symbol}_{side.name}_{datetime.now().strftime('%Y%m%d%H%M%S%f')}"
@@ -182,15 +181,6 @@ def place_order(trading_client, symbol, side, quantity, mongo_client, is_short=F
     
     try:
         current_price = get_latest_price(symbol)
-        
-        # Check margin safety for all orders
-        is_safe, margin_ratio = check_margin_safety(trading_client, symbol, quantity, current_price, side, is_short)
-        if not is_safe:
-            order_type = "SHORT" if is_short else "regular"
-            logging.warning(f"Margin safety check failed for {symbol} {order_type} {side.name} order. "
-                          f"Margin ratio {margin_ratio:.4f} would be below minimum {min_margin_ratio:.4f}. "
-                          f"Order cancelled for safety.")
-            return None
         
         # Proceed with order
         market_order_data = MarketOrderRequest(
@@ -600,6 +590,68 @@ def check_margin_safety(trading_client, ticker, quantity, current_price, order_s
         logging.error(f"Error checking margin safety: {e}")
         # Default to conservative approach - assume not safe if we can't calculate
         return False, 0.0
+
+def calculate_safe_quantity(trading_client, ticker, action, proposed_quantity, current_price=None):
+    """
+    Calculate the maximum safe quantity that won't violate margin requirements.
+    Gradually reduces the quantity until a safe level is found.
+    
+    Args:
+    - trading_client: Alpaca trading client instance
+    - ticker: Stock ticker symbol
+    - action: Trade action ("buy", "sell", "short")
+    - proposed_quantity: Initially proposed quantity
+    - current_price: Current price (optional, will fetch if not provided)
+    
+    Returns:
+    - safe_quantity: Adjusted quantity that won't violate margin requirements
+    """
+    if proposed_quantity <= 0:
+        return 0
+        
+    try:
+        # Get current price if not provided
+        if current_price is None:
+            current_price = get_latest_price(ticker)
+            
+        # Map action to OrderSide
+        is_short = action == "short"
+        side = OrderSide.SELL if action in ["sell", "short"] else OrderSide.BUY
+        
+        # Start with proposed quantity and binary search for safe quantity
+        max_quantity = proposed_quantity
+        min_quantity = 0
+        safe_quantity = 0
+        
+        # Binary search to find the maximum safe quantity
+        while min_quantity <= max_quantity:
+            mid_quantity = (min_quantity + max_quantity) // 2
+            if mid_quantity == 0:
+                break
+                
+            is_safe, _ = check_margin_safety(trading_client, ticker, mid_quantity, current_price, side, is_short)
+            
+            if is_safe:
+                # This quantity works, try a larger one
+                safe_quantity = mid_quantity
+                min_quantity = mid_quantity + 1
+            else:
+                # Too large, try a smaller quantity
+                max_quantity = mid_quantity - 1
+        
+        # If we found a safe quantity
+        if safe_quantity > 0:
+            if safe_quantity < proposed_quantity:
+                logging.info(f"Adjusted {action} quantity for {ticker} from {proposed_quantity} to {safe_quantity} for margin safety")
+            return safe_quantity
+            
+        # No safe quantity found
+        logging.warning(f"Could not find a safe quantity for {ticker} {action}. Margin requirements too strict.")
+        return 0
+        
+    except Exception as e:
+        logging.error(f"Error calculating safe quantity for {ticker}: {e}")
+        return 0
 
 
 def dynamic_period_selector(ticker):
