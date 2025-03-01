@@ -26,13 +26,15 @@ logging.basicConfig(
 
 # Custom logger setup for more controlled console output
 console_logger = logging.getLogger('console')
-console_logger.setLevel(logging.INFO)
-console_handler = logging.StreamHandler()
-console_handler.setLevel(logging.INFO)
-console_formatter = logging.Formatter('%(message)s')  # Simplified format for console
-console_handler.setFormatter(console_formatter)
-console_logger.addHandler(console_handler)
-console_logger.propagate = False  # Prevent double logging
+
+if not console_logger.handlers:
+    console_logger.setLevel(logging.INFO)
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(logging.INFO)
+    console_formatter = logging.Formatter('%(message)s')  # Simplified format for console
+    console_handler.setFormatter(console_formatter)
+    console_logger.addHandler(console_handler)
+    console_logger.propagate = False  # Prevent double logging
 
 # Setup exception tracking
 exception_tracker = ExceptionStats()
@@ -392,7 +394,6 @@ def test():
                             quantity = account["holdings"][ticker]["quantity"]
                             console_logger.info(f"🔴 SELL {ticker}: {quantity} shares @ ${current_price:.2f} (stop-loss/take-profit)")
                             account["trades"].append({"symbol": ticker, "quantity": quantity, "price": current_price, "action": "sell", "date": current_date.strftime('%Y-%m-%d')})
-                            console_logger.info(f"✅ Simulated: {ticker} SELL {quantity} @ ${current_price:.2f}")
                             account["cash"] += quantity * current_price
                             del account["holdings"][ticker]
                 
@@ -405,7 +406,6 @@ def test():
                             condition = "stop-loss" if current_price >= account["short_positions"][ticker]["stop_loss"] else "take-profit"
                             console_logger.info(f"🟢 COVER {ticker}: {quantity} shares @ ${current_price:.2f} ({condition})")
                             account["trades"].append({"symbol": ticker, "quantity": quantity, "price": current_price, "action": "cover", "date": current_date.strftime('%Y-%m-%d')})
-                            console_logger.info(f"✅ Simulated: {ticker} COVER {quantity} @ ${current_price:.2f}")
                             del account["short_positions"][ticker]
                 """
                 now simulate strategies and store 
@@ -469,7 +469,6 @@ def test():
                     safe_cover_qty = cover_qty  # In simulation we don't need actual margin check
                     
                     account["trades"].append({"symbol": ticker, "quantity": safe_cover_qty, "price": current_price, "action": "cover", "date": current_date.strftime('%Y-%m-%d')})
-                    console_logger.info(f"✅ Simulated: {ticker} COVER {safe_cover_qty} @ ${current_price:.2f}")
                     
                     # Update short positions
                     account["short_positions"][ticker]["quantity"] -= safe_cover_qty
@@ -491,7 +490,7 @@ def test():
                     actual_quantity = quantity if short_condition else pragmatic_short_quantity
                     
                     # Short selling with asset limit check
-                    short_position_value = actual_quantity * current_price
+                    short_position_value = (actual_quantity + short_qty) * current_price
                     short_position_ratio = short_position_value / account["total_portfolio_value"]
                     
                     # Check if this short would exceed our per-ticker asset limit
@@ -508,15 +507,14 @@ def test():
                     safe_quantity = actual_quantity  # In simulation we don't need actual margin check
                     
                     account["trades"].append({"symbol": ticker, "quantity": safe_quantity, "price": current_price, "action": "short", "date": current_date.strftime('%Y-%m-%d')})
-                    console_logger.info(f"✅ Simulated: {ticker} SHORT {safe_quantity} @ ${current_price:.2f}")
                     
                     # Setup short positions tracking
                     if ticker not in account["short_positions"]:
                         account["short_positions"][ticker] = {"quantity": 0, "price": current_price}
                     account["short_positions"][ticker]["quantity"] += safe_quantity
                     account["short_positions"][ticker]["price"] = current_price
-                    account["short_positions"][ticker]["stop_loss"] = current_price * (1 + train_stop_loss)
-                    account["short_positions"][ticker]["take_profit"] = current_price * (1 - train_take_profit)
+                    account["short_positions"][ticker]["stop_loss"] = current_price * (1 + train_take_profit)
+                    account["short_positions"][ticker]["take_profit"] = current_price * (1 - train_stop_loss)
                 
                 elif decision == 'sell' and ticker in account["holdings"]:
                     console_logger.info(f"🔴 SELL {ticker}: {quantity} shares @ ${current_price:.2f}")
@@ -528,7 +526,6 @@ def test():
                     execute sell on spot
                     """
                     account["trades"].append({"symbol": ticker, "quantity": safe_quantity, "price": current_price, "action": "sell", "date": current_date.strftime('%Y-%m-%d')})
-                    console_logger.info(f"✅ Simulated: {ticker} SELL {safe_quantity} @ ${current_price:.2f}")
                     quantity = account["holdings"][ticker]["quantity"]
                     account["cash"] += quantity * current_price
                     del account["holdings"][ticker]
@@ -549,7 +546,6 @@ def test():
             safe_quantity = quantity  # In simulation we don't need actual margin check
             
             account["trades"].append({"symbol": ticker, "quantity": safe_quantity, "price": current_price, "action": "buy", "date": current_date.strftime('%Y-%m-%d')})
-            console_logger.info(f"✅ Simulated: {ticker} BUY {safe_quantity} @ ${current_price:.2f} ({buy_type})")
             account["cash"] -= safe_quantity * current_price
             account["holdings"][ticker] = {"quantity": safe_quantity, "price": current_price, "stop_loss": current_price * (1 - train_stop_loss), "take_profit": current_price * (1 + train_take_profit)}
                 
