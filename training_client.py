@@ -188,7 +188,7 @@ def train():
 
         logging.info("-------------------------------------------------")
         for strategy in strategies:
-            logging.info(f"\t\t{strategy.__name__}: ${trading_simulator[strategy.__name__]["portfolio_value"]}")
+            logging.info(f"\t\t{strategy.__name__}: ${trading_simulator[strategy.__name__]['portfolio_value']}")
         logging.info(f"Date: {current_date.strftime('%Y-%m-%d')}")
         logging.info(f"time_delta: {time_delta}")
         logging.info(f"Active count: {active_count}")
@@ -699,7 +699,7 @@ def test():
                 account_values[current_date] = trading_simulator[strategy.__name__]["amount_cash"]
 
         logging.info(f"Date: {current_date.strftime('%Y-%m-%d')}")
-        logging.info(f"Total portfolio value: {account["total_portfolio_value"]}")
+        logging.info(f"Total portfolio value: {account['total_portfolio_value']}")
         logging.info("-------------------------------------------------")
 
         current_date += timedelta(days=1)
