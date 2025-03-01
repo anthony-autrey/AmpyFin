@@ -376,18 +376,12 @@ def log_portfolio_performance(trading_client, mongo_client, send_alerts=True):
         worst_index = min(relative_performance.items(), key=lambda x: x[1])
         
         # Determine overall performance status
-        if portfolio_change > 0:
-            if all(portfolio_change > change for change in index_changes.values()):
-                status = "🔥 OUTPERFORMING ALL INDICES"
-            elif any(portfolio_change > change for change in index_changes.values()):
-                status = "✅ MIXED PERFORMANCE"
-            else:
-                status = "⚠️ UNDERPERFORMING"
+        if all(portfolio_change > change for change in index_changes.values()):
+            status = "🔥 OUTPERFORMING ALL INDICES"
+        elif any(portfolio_change > change for change in index_changes.values()):
+            status = "✅ MIXED PERFORMANCE"
         else:
-            if all(portfolio_change > change for change in index_changes.values()):
-                status = "✅ OUTPERFORMING (SMALLER LOSSES)"
-            else:
-                status = "⚠️ UNDERPERFORMING"
+            status = "⚠️ UNDERPERFORMING"
                 
         # Log the performance
         console_logger.info("\n" + "=" * 50)
