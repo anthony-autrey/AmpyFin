@@ -3,3 +3,9 @@ Get ranking client in line with trading client
 rename from ampythropic
 
 Make a nice setup script
+
+Test if shorts actually make any money
+    Turn off buys and see if shorts make money
+    Compare profits against normal ampyfin 
+
+Make linear pragmatism slide from 0 to .5 (or max) as cash decreases

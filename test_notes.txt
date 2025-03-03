@@ -1,0 +1,31 @@
+## .5 ratio_req from 1-2022 to 1-2024: $12k (Couldn't reproduce this, maybe it went to 2025?, maybe just 2023)
+## .4 ratio_req from 1-2022 to 1-2024: $10k (really big swings) 
+## .5 ratio_req, time delta .4 from 1-2022 to 1-2024: $10.2k 
+## .5 ratio_req, time delta .3 from 1-2022 to 1-2024: $9k 
+## .5 ratio_req, time delta .2, short ratio mod 1.3 from 1-2022 to 1-2024: $?k (stopped early, only had 7k after 1 year)
+## .5 ratio_req, time delta .2, short ratio mod 1.2 from 1-2022 to 1-2024: 9k
+## .5 ratio_req, time delta .2, short ratio mod 1.25, take profit: 7.5% from 1-2022 to 1-2024: $10.4k
+
+## (reproduce original test) (did I change the pragmatism modifier?) ## .5 ratio_req, time delta .2, short ratio mod 1.25, take profit: 5% from 1-2022 to 1-2024: $9k
+## .5 ratio_req, time delta .2, short ratio mod 1.25, take profit: 5%, pragmatism_modifier: .25 from 1-2022 to 1-2024: $9.8k (If this works, try with the 7.5 take profit)
+## (incorporate all successful changes now) .45 ratio_req, time delta .4,  take profit: 7.5%, .25 pragmatism_modifier: .25:   9.7k (started at 5:33pm)
+## .5 ratio_req, time delta .2, short ratio mod 1.25, take profit: 7.5% from 1-2022 to 1-2024: $10.4k (trying to reproduce!) (was the pragmatism_modifier mod .25 or .2? (in this repro test it was .2)) Ended with 7.8k!!
+## (retesting with pragmatism_modifier at .25) (Started at 8:48pm) Ended with 8.9k!!
+
+## .5 ratio_req from 1-2022 to 1-2024: $12k (Couldn't reproduce this, maybe it went to 2025?, maybe just 2023) (trying again after ctrl+z) (oops, I left take profit at 7.5%) $8.3k!!!
+## .5 ratio_req from 1-2022 to 1-2024: $12k (Couldn't reproduce this, maybe it went to 2025?, maybe just 2023) (trying again after ctrl+z and fixing take_profit)  $10.5k!!!
+## Trying 0.4 time delta again: 
+
+Best of above tests (I think, because something was wrong in notes) was: .5 ratio_req, time_delta: .2, short_ratio_mod: 1.25, take_profit 1.25, pragmatism_modifier .2 ($10.5k)
+####################################
+Now testing from 1-2023 to 1-2025 (almost all market gains)
+
+
+
+(Play with pragmatism_modifier)
+- Test lower ratio requirement (maybe we're missing good trades by being too restrictive)
+- Try higher time delta to allow for faster adjustments
+- Possibly try the higher time delta with the lower ratio requirement to adjust fast through the swings
+- If higher time delta works, try even higher
+- Try higher take profit 
+- Do tests on pragmatism_modifier

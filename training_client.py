@@ -341,8 +341,7 @@ def test():
             _, _, _, strategy_name = heapq.heappop(q)
             rank[strategy_name] = coeff_rank
             coeff_rank+=1
-            
-        console_logger.info(f"🏆 Updated strategy rankings")
+
         return rank
 
     strategy_to_coefficient = {}
@@ -358,7 +357,7 @@ def test():
     account_values = pd.Series(index=pd.date_range(start=start_date, end=end_date))
     
     while current_date <= end_date:
-        print(f"Simulating strategies for date: {current_date.strftime('%Y-%m-%d')}")
+        # print(f"Simulating strategies for date: {current_date.strftime('%Y-%m-%d')}")
         if current_date.weekday() >= 5:
             current_date += timedelta(days=1)
             continue
@@ -392,7 +391,8 @@ def test():
                     if account["holdings"][ticker]["quantity"] > 0:
                         if current_price < account["holdings"][ticker]["stop_loss"] or current_price > account["holdings"][ticker]["take_profit"]:
                             quantity = account["holdings"][ticker]["quantity"]
-                            console_logger.info(f"🔴 SELL {ticker}: {quantity} shares @ ${current_price:.2f} (stop-loss/take-profit)")
+                            condition = "🛑 stop-loss" if current_price < account["holdings"][ticker]["stop_loss"] else "💲 take-profit"
+                            console_logger.info(f"🔴 SELL {ticker}: {quantity} shares @ ${current_price:.2f} ({condition})")
                             account["trades"].append({"symbol": ticker, "quantity": quantity, "price": current_price, "action": "sell", "date": current_date.strftime('%Y-%m-%d')})
                             account["cash"] += quantity * current_price
                             del account["holdings"][ticker]
@@ -403,8 +403,12 @@ def test():
                         # For short positions, stop loss is price going up, take profit is price going down
                         if current_price >= account["short_positions"][ticker]["stop_loss"] or current_price <= account["short_positions"][ticker]["take_profit"]:
                             quantity = account["short_positions"][ticker]["quantity"]
-                            condition = "stop-loss" if current_price >= account["short_positions"][ticker]["stop_loss"] else "take-profit"
-                            console_logger.info(f"🟢 COVER {ticker}: {quantity} shares @ ${current_price:.2f} ({condition})")
+                            condition = "🛑 stop-loss" if current_price >= account["short_positions"][ticker]["stop_loss"] else "💲 take-profit"
+                            console_logger.info(f"🟡 COVER {ticker}: {quantity} shares @ ${current_price:.2f} ({condition})")
+                            entry_price = account["short_positions"][ticker]["price"]
+                            unrealized_pnl = (entry_price - current_price) * quantity
+                            account["cash"] += unrealized_pnl
+                            # account["cash"] += unrealized_pnl - (entry_price * quantity)
                             account["trades"].append({"symbol": ticker, "quantity": quantity, "price": current_price, "action": "cover", "date": current_date.strftime('%Y-%m-%d')})
                             del account["short_positions"][ticker]
                 """
@@ -423,6 +427,7 @@ def test():
                     historical_data = get_historical_data(ticker, current_date, ideal_period[strategy.__name__], ticker_price_history)
                     account_cash = account["cash"]
                     portfolio_qty = account["holdings"][ticker]["quantity"] if ticker in account["holdings"] else 0
+                    short_portfolio_qty = account["short_positions"][ticker]["quantity"] if ticker in account["short_positions"] else 0
                     total_portfolio_value = account["total_portfolio_value"]
                     decision, qty = simulate_strategy(strategy, ticker, current_price, historical_data, account_cash, portfolio_qty, total_portfolio_value)
                     weight = strategy_to_coefficient[strategy.__name__]
@@ -432,15 +437,23 @@ def test():
                 short_quantities = [quantity for decision, quantity, _ in decisions_and_quantities if decision == 'short']
                 
                 decision, quantity, buy_weight, sell_weight, hold_weight, short_weight = weighted_majority_decision_and_median_quantity(decisions_and_quantities)
+
                 pragmatic_buy_quantity = median(buy_quantities) if buy_quantities else 0
                 pragmatic_short_quantity = median(short_quantities) if short_quantities else 0
                 
                 # Check for short positions
                 short_position = account.get("short_positions", {}).get(ticker, {"quantity": 0})
                 short_qty = short_position.get("quantity", 0)
-                
+
+                ratio_requirement = 0.5 #.5
+                pragmatism_modifier = 1
+
+                if account["cash"] > train_trade_liquidity_limit * 1.5:
+                    pragmatism_modifier *= .2
+                total_weight = short_weight + buy_weight + hold_weight + sell_weight
+                buy_ratio = buy_weight / total_weight
                 # Mirror trading_client.py's pragmatic condition logic
-                buy_condition = decision == "buy" and float(account["cash"]) > train_trade_liquidity_limit and (((quantity + portfolio_qty) * current_price) / account["total_portfolio_value"]) < train_trade_asset_limit
+                buy_condition = buy_ratio > ratio_requirement * pragmatism_modifier and decision == "buy" and float(account["cash"]) > train_trade_liquidity_limit and (((quantity + portfolio_qty) * current_price) / account["total_portfolio_value"]) < train_trade_asset_limit
                 
                 # Check for buy condition with less restrictive requirements
                 pragmatic_buy_condition = (float(account["cash"]) > (train_trade_liquidity_limit * pragmatic_buying_power_factor) and
@@ -448,9 +461,12 @@ def test():
                     buy_weight > sell_weight and 
                     buy_weight > short_weight and
                     pragmatic_buy_quantity > 0)
-                    
+                
+
+                short_ratio = short_weight / total_weight
+                short_ratio_modifier = 1.25
                 # Mirror trading_client.py's short condition logic
-                short_condition = decision == "short" and enable_short_selling and short_qty == 0
+                short_condition = decision == "short" and enable_short_selling and short_qty == 0 and short_ratio > ratio_requirement * short_ratio_modifier and (((short_qty + short_portfolio_qty) * current_price) / account["total_portfolio_value"]) < train_trade_asset_limit
                 
                 # Mirror trading_client.py's pragmatic short condition logic
                 pragmatic_short_condition = (enable_short_selling and 
@@ -461,26 +477,36 @@ def test():
                     short_weight > sell_weight and
                     pragmatic_short_quantity > 0)
                 
+                
                 # Check if we need to cover a short position first
-                if decision == "buy" and short_qty > 0:
+                if (buy_condition or pragmatic_buy_condition) and short_qty > 0:
                     # Buy to cover short positions
-                    console_logger.info(f"🟢 COVER {ticker}: {short_qty} shares @ ${current_price:.2f}")
-                    cover_qty = min(quantity, short_qty)
-                    safe_cover_qty = cover_qty  # In simulation we don't need actual margin check
+                    condition = 'buy' if buy_condition else 'pragmatic buy'
+                    console_logger.info(f"🟡 COVER {ticker}: {short_qty} shares @ ${current_price:.2f} ({condition})")
+                    # console_logger.info(f"💡{ticker} d: {decision}, q: {quantity}, bw: {buy_weight}, sw: {sell_weight}, hw: {hold_weight}, sh_w: {short_weight}")                    
+                    buy_quantity = quantity if decision == 'buy' else pragmatic_buy_quantity
+                    cover_qty = min(buy_quantity, short_qty)
                     
-                    account["trades"].append({"symbol": ticker, "quantity": safe_cover_qty, "price": current_price, "action": "cover", "date": current_date.strftime('%Y-%m-%d')})
+                    account["trades"].append({"symbol": ticker, "quantity": cover_qty, "price": current_price, "action": "cover", "date": current_date.strftime('%Y-%m-%d')})
                     
+                    entry_price = account["short_positions"][ticker]["price"]
+                    unrealized_pnl = (entry_price - current_price) * cover_qty
+                    account["cash"] += unrealized_pnl
+                    # account["cash"] += unrealized_pnl - (entry_price * cover_qty)
+
                     # Update short positions
-                    account["short_positions"][ticker]["quantity"] -= safe_cover_qty
-                    if account["short_positions"][ticker]["quantity"] <= 0:
-                        del account["short_positions"][ticker]
+                    if ticker in account["short_positions"]:
+                        account["short_positions"][ticker]["quantity"] -= cover_qty
+
+                        if account["short_positions"][ticker]["quantity"] <= 0:
+                            del account["short_positions"][ticker]
+                    
                 
                 # Implement same buy heap logic as trading_client
                 elif buy_condition or pragmatic_buy_condition:
                     buy_type = "standard" if buy_condition else "pragmatic"
                     # Use appropriate quantity based on condition type
                     actual_quantity = quantity if buy_condition else pragmatic_buy_quantity
-                    console_logger.info(f"Adding {ticker} to buy heap: {actual_quantity} shares ({buy_type} buy)")
                     heapq.heappush(buy_heap, (-(buy_weight-(sell_weight + short_weight + (hold_weight * 0.5))), actual_quantity, ticker, buy_type))
                 
                 # Implement short selling like trading_client
@@ -498,23 +524,25 @@ def test():
                         # Adjust quantity to stay within limits
                         adjusted_quantity = int((train_trade_asset_limit * account["total_portfolio_value"]) / current_price)
                         if adjusted_quantity < 1:
-                            logging.info(f"Cannot short {ticker}: position would exceed asset limit {train_trade_asset_limit:.2f} of portfolio")
                             continue
                         actual_quantity = adjusted_quantity
                     
                     console_logger.info(f"🔵 SHORT {ticker}: {actual_quantity} shares @ ${current_price:.2f} ({short_type} short)")
+                    # console_logger.info(f"💡{ticker} d: {decision}, q: {quantity}, bw: {buy_weight}, sw: {sell_weight}, hw: {hold_weight}, sh_w: {short_weight}")
+
                     actual_quantity = max(actual_quantity, 1)
                     safe_quantity = actual_quantity  # In simulation we don't need actual margin check
                     
                     account["trades"].append({"symbol": ticker, "quantity": safe_quantity, "price": current_price, "action": "short", "date": current_date.strftime('%Y-%m-%d')})
+                    # account["cash"] += safe_quantity * current_price
                     
                     # Setup short positions tracking
                     if ticker not in account["short_positions"]:
                         account["short_positions"][ticker] = {"quantity": 0, "price": current_price}
                     account["short_positions"][ticker]["quantity"] += safe_quantity
                     account["short_positions"][ticker]["price"] = current_price
-                    account["short_positions"][ticker]["stop_loss"] = current_price * (1 + train_take_profit)
-                    account["short_positions"][ticker]["take_profit"] = current_price * (1 - train_stop_loss)
+                    account["short_positions"][ticker]["stop_loss"] = current_price * (1 + train_stop_loss)
+                    account["short_positions"][ticker]["take_profit"] = current_price * (1 - train_take_profit)
                 
                 elif decision == 'sell' and ticker in account["holdings"]:
                     console_logger.info(f"🔴 SELL {ticker}: {quantity} shares @ ${current_price:.2f}")
@@ -543,11 +571,11 @@ def test():
                 console_logger.info(f"🟢 BUY {ticker}: {quantity} shares @ ${ticker_price_history[ticker].loc[current_date.strftime('%Y-%m-%d')]['Close']:.2f}")
             
             current_price = ticker_price_history[ticker].loc[current_date.strftime('%Y-%m-%d')]['Close']
-            safe_quantity = quantity  # In simulation we don't need actual margin check
             
-            account["trades"].append({"symbol": ticker, "quantity": safe_quantity, "price": current_price, "action": "buy", "date": current_date.strftime('%Y-%m-%d')})
-            account["cash"] -= safe_quantity * current_price
-            account["holdings"][ticker] = {"quantity": safe_quantity, "price": current_price, "stop_loss": current_price * (1 - train_stop_loss), "take_profit": current_price * (1 + train_take_profit)}
+            account["trades"].append({"symbol": ticker, "quantity": quantity, "price": current_price, "action": "buy", "date": current_date.strftime('%Y-%m-%d')})
+            account["cash"] -= quantity * current_price
+            current_qty = account["holdings"][ticker]["quantity"] if ticker in account["holdings"] else 0
+            account["holdings"][ticker] = {"quantity": quantity + current_qty, "price": current_price, "stop_loss": current_price * (1 - train_stop_loss), "take_profit": current_price * (1 + train_take_profit)}
                 
         buy_heap = []
         # logging.info("-------------------------------------------------")
@@ -656,26 +684,35 @@ def test():
         """
         # Calculate total portfolio value including cash, long and short positions
         total_value = account["cash"]
-        
+        console_logger.info("\n📋 Positions:")              
+        console_logger.info(f"💵 Cash: {total_value}")
+        console_logger.info("-------------------------------------------------")              
         # Add value of long positions
         for ticker in account["holdings"]:
             daily_data = ticker_price_history[ticker].loc[current_date.strftime('%Y-%m-%d')]
             current_price = daily_data['Close']
+            entry_price = account["holdings"][ticker]["price"]
+            quantity = account["holdings"][ticker]["quantity"]
+            unrealized_pnl = (current_price - entry_price) * quantity
+            console_logger.info(f"📈 {ticker}: pnl: {unrealized_pnl}, cp: {current_price}, ep: {entry_price}, q: {quantity} v: {current_price * quantity}")
             total_value += account["holdings"][ticker]["quantity"] * current_price
         
         # For short positions, unrealized profit/loss affects total value
         for ticker in account.get("short_positions", {}):
-            if current_date.strftime('%Y-%m-%d') in ticker_price_history[ticker].index:
-                daily_data = ticker_price_history[ticker].loc[current_date.strftime('%Y-%m-%d')]
-                current_price = daily_data['Close']
-                entry_price = account["short_positions"][ticker]["price"]
-                quantity = account["short_positions"][ticker]["quantity"]
-                
-                # For shorts, profit is made when price decreases
-                unrealized_pnl = (entry_price - current_price) * quantity
-                total_value += unrealized_pnl
+            daily_data = ticker_price_history[ticker].loc[current_date.strftime('%Y-%m-%d')]
+            current_price = daily_data['Close']
+            entry_price = account["short_positions"][ticker]["price"]
+            quantity = account["short_positions"][ticker]["quantity"]
+            
+            # For shorts, profit is made when price decreases
+            unrealized_pnl = (entry_price - current_price) * quantity
+            console_logger.info(f"📉 {ticker}: pnl: {unrealized_pnl}, cp: {current_price}, ep: {entry_price}, q: {quantity} v: {current_price * quantity}")
+            total_value += unrealized_pnl
+            # total_value += unrealized_pnl - (entry_price * quantity)
         
         account["total_portfolio_value"] = total_value
+        console_logger.info("-------------------------------------------------")              
+
 
         active_count, trading_simulator = local_update_portfolio_values(current_date, strategies, trading_simulator, ticker_price_history)
         
@@ -694,9 +731,10 @@ def test():
                 # Default to cash if no prior data exists (e.g., first day)
                 account_values[current_date] = trading_simulator[strategy.__name__]["amount_cash"]
 
-        logging.info(f"Date: {current_date.strftime('%Y-%m-%d')}")
-        logging.info(f"Total portfolio value: {account['total_portfolio_value']}")
-        logging.info("-------------------------------------------------")
+        console_logger.info("\n-------------------------------------------------")
+        console_logger.info(f"📅 Date: {current_date.strftime('%Y-%m-%d')}")
+        console_logger.info(f"💰 Total portfolio value: {account['total_portfolio_value']}")
+        console_logger.info("-------------------------------------------------\n")
 
         current_date += timedelta(days=1)
     
