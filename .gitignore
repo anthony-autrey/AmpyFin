@@ -4,3 +4,4 @@ config.py
 .vscode/
 **/__pycache__/
 *.json
+test_notes.txt

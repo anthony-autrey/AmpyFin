@@ -18,7 +18,11 @@
 
 Best of above tests (I think, because something was wrong in notes) was: .5 ratio_req, time_delta: .2, short_ratio_mod: 1.25, take_profit 1.25, pragmatism_modifier .2 ($10.5k)
 ####################################
-Now testing from 1-2023 to 1-2025 (almost all market gains)
+Now testing from 1-2023 to 1-2025 (almost all market gains) $4,642.14 (very bad. Why?)
+Getting 3.01 benchmark 1-2023 to 1-2025: $12.5k
+Getting 3.01 benchmark 1-2022 to 1-2024: $5.8k
+
+Testing ampythropic with shorts turned off during 2023-2025: 
 
 
 
