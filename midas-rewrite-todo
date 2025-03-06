@@ -1,0 +1,7 @@
+- Clean up code logic
+    - Break things into well-named functions
+        - training client
+        - training helper
+
+- Implement shorting
+- Dependency injection for better testing
