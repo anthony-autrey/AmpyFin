@@ -1,27 +1,20 @@
-from config_variables import FINANCIAL_PREP_API_KEY, API_KEY, API_SECRET, BASE_URL, MONGO_URL
-import time
-from datetime import datetime, timedelta
-from alpaca.common.exceptions import APIError
-from strategies.talib_indicators import *
-import math
 import yfinance as yf
-from collections import Counter
-from trading_client import market_status
-from helper_files.client_helper import strategies, get_latest_price, get_ndaq_tickers, dynamic_period_selector, get_mongo_client
-import time
-from datetime import datetime 
 import heapq 
 import certifi
-
+import json
+from config_variables import FINANCIAL_PREP_API_KEY, MONGO_URL
+from datetime import datetime, timedelta
+from strategies.talib_indicators import *
+from helper_files.client_helper import strategies, get_ndaq_tickers, get_mongo_client
+from datetime import datetime 
+from ranking_client import update_ranks
+from helper_files.train_client_helper import *
+from trading_client import weighted_majority_decision_and_median_quantity
 from control import mode, train_time_delta_mode, train_time_delta_increment, train_time_delta_multiplicative, train_time_delta_balanced, train_rank_liquidity_limit, train_rank_asset_limit
 from control import train_profit_price_change_ratio_d1, train_profit_profit_time_d1, train_profit_price_change_ratio_d2, train_profit_profit_time_d2, train_profit_profit_time_else
 from control import train_loss_price_change_ratio_d1, train_loss_price_change_ratio_d2, train_loss_profit_time_d1, train_loss_profit_time_d2, train_loss_profit_time_else
 from control import period_start, period_end, train_tickers, train_stop_loss, train_take_profit, train_start_cash, train_trade_liquidity_limit, train_trade_asset_limit, train_suggestion_heap_limit
 from control import train_data_path
-import json
-from ranking_client import update_ranks
-from helper_files.train_client_helper import *
-from trading_client import weighted_majority_decision_and_median_quantity
 from helper_files.logging import get_logger
 
 ca = certifi.where()
