@@ -5,7 +5,6 @@ from alpaca.common.exceptions import APIError
 from strategies.talib_indicators import *
 import math
 import yfinance as yf
-import logging
 from collections import Counter
 from trading_client import market_status
 from helper_files.client_helper import strategies, get_latest_price, get_ndaq_tickers, dynamic_period_selector, get_mongo_client
@@ -13,17 +12,6 @@ import time
 from datetime import datetime 
 import heapq 
 import certifi
-ca = certifi.where()
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    datefmt='%Y-%m-%d %H:%M:%S',
-    handlers=[
-        logging.FileHandler('rank_system.log'),  # Log messages to a file
-        logging.StreamHandler()             # Log messages to the console
-    ]
-)
-
 
 from control import mode, train_time_delta_mode, train_time_delta_increment, train_time_delta_multiplicative, train_time_delta_balanced, train_rank_liquidity_limit, train_rank_asset_limit
 from control import train_profit_price_change_ratio_d1, train_profit_profit_time_d1, train_profit_price_change_ratio_d2, train_profit_profit_time_d2, train_profit_profit_time_else
@@ -34,6 +22,10 @@ import json
 from ranking_client import update_ranks
 from helper_files.train_client_helper import *
 from trading_client import weighted_majority_decision_and_median_quantity
+from helper_files.logging import get_logger
+
+ca = certifi.where()
+logger = get_logger()
 
 def train():
     """
@@ -75,11 +67,11 @@ def train():
     for ticker in train_tickers:
         try:
             data = yf.Ticker(ticker).history(start=data_start_date, end=period_end, interval="1d")
-            logging.info(f'Got data: {ticker}  \t {data.iloc[0].name.date()} to {data.iloc[-1].name.date()}')
+            logger.info(f'Got data: {ticker}  \t {data.iloc[0].name.date()} to {data.iloc[-1].name.date()}')
             ticker_price_history[ticker] = data
         except:
             data = yf.Ticker(ticker).history(period="max", interval="1d")
-            logging.info(f'Got data: {ticker}  \t {data.iloc[0].name.date()} to {data.iloc[-1].name.date()}')
+            logger.info(f'Got data: {ticker}  \t {data.iloc[0].name.date()} to {data.iloc[-1].name.date()}')
             ticker_price_history[ticker] = data
     
     
@@ -175,13 +167,13 @@ def train():
         log history of trading_simulator and points
         """
 
-        logging.info("-------------------------------------------------")
+        logger.info("-------------------------------------------------")
         for strategy in strategies:
-            logging.info(f"\t\t{strategy.__name__}: ${trading_simulator[strategy.__name__]["portfolio_value"]}")
-        logging.info(f"Date: {current_date.strftime('%Y-%m-%d')}")
-        logging.info(f"time_delta: {time_delta}")
-        logging.info(f"Active count: {active_count}")
-        logging.info("-------------------------------------------------")
+            logger.info(f"\t\t{strategy.__name__}: ${trading_simulator[strategy.__name__]['portfolio_value']}")
+        logger.info(f"Date: {current_date.strftime('%Y-%m-%d')}")
+        logger.info(f"time_delta: {time_delta}")
+        logger.info(f"Active count: {active_count}")
+        logger.info("-------------------------------------------------")
         
         """
         Update time_delta based on the mode
@@ -303,11 +295,11 @@ def test():
     for ticker in train_tickers:
         try:
             data = yf.Ticker(ticker).history(start=data_start_date, end=period_end, interval="1d")
-            logging.info(f'Got data: {ticker}  \t {data.iloc[0].name.date()} to {data.iloc[-1].name.date()}')
+            logger.info(f'Got data: {ticker}  \t {data.iloc[0].name.date()} to {data.iloc[-1].name.date()}')
             ticker_price_history[ticker] = data
         except:
             data = yf.Ticker(ticker).history(period="max", interval="1d")
-            logging.info(f'Got data: {ticker}  \t {data.iloc[0].name.date()} to {data.iloc[-1].name.date()}')
+            logger.info(f'Got data: {ticker}  \t {data.iloc[0].name.date()} to {data.iloc[-1].name.date()}')
             ticker_price_history[ticker] = data
     start_date = datetime.strptime(period_start, "%Y-%m-%d")
     end_date = datetime.strptime(period_end, "%Y-%m-%d")
@@ -433,13 +425,13 @@ def test():
                 
         buy_heap = []
         suggestion_heap = []
-        # logging.info("-------------------------------------------------")
-        # logging.info(f"Account Cash: ${account['cash']:,.2f}")
-        # logging.info(f"Trades: {account['trades']}")
-        # logging.info(f"Holdings: {account['holdings']}")
-        # logging.info(f"Total Portfolio Value: ${account['total_portfolio_value']:,.2f}")
+        # logger.info("-------------------------------------------------")
+        # logger.info(f"Account Cash: ${account['cash']:,.2f}")
+        # logger.info(f"Trades: {account['trades']}")
+        # logger.info(f"Holdings: {account['holdings']}")
+        # logger.info(f"Total Portfolio Value: ${account['total_portfolio_value']:,.2f}")
         
-        # logging.info("-------------------------------------------------")
+        # logger.info("-------------------------------------------------")
         # time.sleep(5)
         """
         simulate ranking
@@ -515,12 +507,12 @@ def test():
         # """
         # log history of trading_simulator and points
         # """
-        # logging.info(f"Trading simulator: {trading_simulator}")
-        # logging.info(f"Points: {points}")
-        # logging.info(f"Date: {current_date.strftime('%Y-%m-%d')}")
-        # logging.info(f"time_delta: {time_delta}")
-        # logging.info(f"Active count: {active_count}")
-        # logging.info("-------------------------------------------------")
+        # logger.info(f"Trading simulator: {trading_simulator}")
+        # logger.info(f"Points: {points}")
+        # logger.info(f"Date: {current_date.strftime('%Y-%m-%d')}")
+        # logger.info(f"time_delta: {time_delta}")
+        # logger.info(f"Active count: {active_count}")
+        # logger.info("-------------------------------------------------")
         
         """
         Update time_delta based on the mode
@@ -561,9 +553,9 @@ def test():
                 # Default to cash if no prior data exists (e.g., first day)
                 account_values[current_date] = trading_simulator[strategy.__name__]["amount_cash"]
 
-        logging.info(f"Date: {current_date.strftime('%Y-%m-%d')}")
-        logging.info(f"Total portfolio value: {account["total_portfolio_value"]}")
-        logging.info("-------------------------------------------------")
+        logger.info(f"Date: {current_date.strftime('%Y-%m-%d')}")
+        logger.info(f"Total portfolio value: {account['total_portfolio_value']}")
+        logger.info("-------------------------------------------------")
 
         current_date += timedelta(days=1)
         # time.sleep(5)
